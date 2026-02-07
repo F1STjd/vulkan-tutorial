@@ -6,8 +6,11 @@
 #include <expected>
 #include <format>
 #include <iostream>
+#include <optional>
 #include <print>
+#include <ranges>
 #include <string>
+#include <utility>
 
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS 1
 #define VULKAN_HPP_NO_EXCEPTIONS
@@ -74,6 +77,8 @@ private:
       .and_then([ this ] -> std::expected<void, std::string>
         { return setup_debug_messenger(); })
       .and_then([ this ] -> std::expected<void, std::string>
+        { return create_surface(); })
+      .and_then([ this ] -> std::expected<void, std::string>
         { return pick_physical_device(); })
       .and_then([ this ] -> std::expected<void, std::string>
         { return create_logical_device(); });
@@ -139,6 +144,22 @@ private:
   }
 
   auto
+  create_surface() -> std::expected<void, std::string>
+  {
+    VkSurfaceKHR _surface {};
+    if (glfwCreateWindowSurface(*instance_, window_, nullptr, &_surface) != 0)
+    {
+      return std::expected<void, std::string> {
+        std::unexpect,
+        std::format("Failed to create window surface"),
+      };
+    }
+
+    surface_ = vk::raii::SurfaceKHR(instance_, _surface);
+    return {};
+  }
+
+  auto
   pick_physical_device() -> std::expected<void, std::string>
   {
     return //
@@ -163,14 +184,15 @@ private:
   auto
   create_logical_device() -> std::expected<void, std::string>
   {
-    auto queue_family_properties = physical_device_.getQueueFamilyProperties();
-    auto graphics_index = find_queue_families(physical_device_);
-    constexpr auto queue_priority { 0.5F };
-    vk::DeviceQueueCreateInfo device_queue_create_info {
-      .queueFamilyIndex = graphics_index,
-      .queueCount = 1,
-      .pQueuePriorities = &queue_priority,
-    };
+    auto [ graphics_index, presentation_index ] = get_queue_family_indices();
+
+    if (!graphics_index || !presentation_index)
+    {
+      return std::expected<void, std::string> {
+        std::unexpect,
+        "Could not find required queue families",
+      };
+    }
 
     // tutorial says it could be used later (if not I'll remove it)
     [[maybe_unused]] vk::PhysicalDeviceFeatures device_features;
@@ -183,6 +205,13 @@ private:
       vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT {
         .extendedDynamicState = vk::Bool32 { true },
       },
+    };
+
+    constexpr auto queue_priority { 0.5F };
+    vk::DeviceQueueCreateInfo device_queue_create_info {
+      .queueFamilyIndex = *graphics_index,
+      .queueCount = 1,
+      .pQueuePriorities = &queue_priority,
     };
 
     vk::DeviceCreateInfo device_create_info {
@@ -201,7 +230,7 @@ private:
         [ this, graphics_index ](auto device) noexcept -> auto
         {
           device_ = std::move(device);
-          graphics_queue_ = device_.getQueue(graphics_index, 0);
+          graphics_queue_ = device_.getQueue(*graphics_index, 0);
         });
   }
 
@@ -359,20 +388,38 @@ private:
   }
 
   auto
-  find_queue_families(const vk::raii::PhysicalDevice& device) -> std::uint32_t
+  get_queue_family_indices()
+    -> std::pair<std::optional<std::uint32_t>, std::optional<std::uint32_t>>
   {
-    auto queueFamilyProperties = device.getQueueFamilyProperties();
+    std::optional<std::uint32_t> graphics_index;
+    std::optional<std::uint32_t> presentation_index;
 
-    auto graphics_queue_family_property =
-      std::ranges::find_if(queueFamilyProperties,
-        [](const vk::QueueFamilyProperties& qfp) noexcept -> bool
-        {
-          return (qfp.queueFlags & vk::QueueFlagBits::eGraphics) !=
-            vk::QueueFlags { 0 };
-        });
+    auto queue_families = physical_device_.getQueueFamilyProperties();
 
-    return static_cast<uint32_t>(std::distance(
-      queueFamilyProperties.begin(), graphics_queue_family_property));
+    for (const auto& [ index, qfp ] : queue_families | std::views::enumerate)
+    {
+      const bool supports_graphics =
+        (qfp.queueFlags & vk::QueueFlagBits::eGraphics) != vk::QueueFlags { 0 };
+
+      const auto [ result, supports_presentation ] =
+        physical_device_.getSurfaceSupportKHR(
+          static_cast<std::uint32_t>(index), *surface_);
+
+      if (supports_graphics && !graphics_index) { graphics_index = index; }
+
+      if ((supports_presentation != vk::Bool32 { 0 }) && !presentation_index)
+      {
+        presentation_index = index;
+      }
+
+      if (supports_graphics && (supports_presentation != vk::Bool32 { 0 }))
+      {
+        graphics_index = presentation_index = index;
+        break;
+      }
+    }
+
+    return std::make_pair(graphics_index, presentation_index);
   }
 
 private:
@@ -380,7 +427,9 @@ private:
   vk::raii::Context context_;
   vk::raii::Instance instance_ { nullptr };
   vk::raii::DebugUtilsMessengerEXT debug_messenger_ { nullptr };
+  vk::raii::SurfaceKHR surface_ { nullptr };
   vk::raii::PhysicalDevice physical_device_ { nullptr };
   vk::raii::Device device_ { nullptr };
   vk::raii::Queue graphics_queue_ { nullptr };
+  vk::raii::Queue presentation_queue_ { nullptr };
 };
