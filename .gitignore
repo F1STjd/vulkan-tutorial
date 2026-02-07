@@ -1,0 +1,35 @@
+# Build output
+build*/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/build.ninja
+**/.ninja_deps
+**/.ninja_log
+**/compile_commands.json
+
+# Binaries / libraries
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.o
+*.obj
+*.out
+
+# CMake/IDE metadata
+CMakeUserPresets.json
+.vscode/
+.vs/
+.idea/
+*.code-workspace
+
+# Cache
+.cache/
+
+# OS / tooling
+.DS_Store
+Thumbs.db
+*.log
