@@ -108,15 +108,14 @@ private:
   auto
   create_instance() -> std::expected<void, std::string>
   {
-    return get_required_layers() //
-      .and_then(
-        [ this ](auto layers) -> std::expected<void, std::string>
-        {
-          return get_required_extensions() //
-            .and_then([ this, layers = std::move(layers) ](
-                        auto extensions) -> std::expected<void, std::string>
-              { return create_vulkan_instance(layers, extensions); });
-        });
+    std::vector<const char*> layers;
+    std::vector<const char*> extensions;
+
+    return get_required_layers(layers)
+      .and_then([ &, this ]() -> std::expected<void, std::string>
+        { return get_required_extensions(extensions); })
+      .and_then([ &, this ]() -> std::expected<void, std::string>
+        { return create_vulkan_instance(layers, extensions); });
   }
 
   auto
@@ -144,8 +143,7 @@ private:
       vk_utils::check_vk_result(instance_.createDebugUtilsMessengerEXT(
                                   debug_utils_messenger_create_info_EXT),
         "Failed to create debug messenger, with result: {}")
-        .transform([ this ](auto messenger) noexcept -> auto
-          { debug_messenger_ = std::move(messenger); });
+        .transform(vk_utils::store_into(debug_messenger_));
   }
 
   auto
@@ -280,26 +278,25 @@ private:
       vk_utils::check_vk_result(context_.enumerateInstanceLayerProperties(),
         "Failed to enumerate instance layer properties, with result: {} ")
         .and_then(
-          [ required_layers = std::move(required_layers) ](
-            const auto& layer_properties) -> auto
+          [ &required_layers ](const auto& layer_properties) -> auto
           {
             return vk_utils::validate_required(
               std::move(required_layers), layer_properties,
               [](const auto& prop) noexcept -> auto
               { return prop.layerName.data(); },
               "Required layer is not supported");
-          });
+          })
+        .transform(vk_utils::store_into(required_layers));
   }
 
   auto
-  get_required_extensions()
-    -> std::expected<std::vector<const char*>, std::string>
+  get_required_extensions(std::vector<const char*>& required_extensions)
+    -> std::expected<void, std::string>
   {
     std::uint32_t glfw_extension_count {};
     auto* glfw_extensions =
       glfwGetRequiredInstanceExtensions(&glfw_extension_count);
 
-    std::vector<const char*> required_extensions;
     required_extensions.reserve(glfw_extension_count + 1U);
     for (const auto* extension :
       std::span { glfw_extensions, glfw_extension_count })
@@ -316,15 +313,15 @@ private:
       vk_utils::check_vk_result(context_.enumerateInstanceExtensionProperties(),
         "Failed to enumerate instance extension properties, with result: {}")
         .and_then(
-          [ required_extensions = std::move(required_extensions) ](
-            const auto& extension_properties) -> auto
+          [ &required_extensions ](const auto& extension_properties) -> auto
           {
             return vk_utils::validate_required(
               std::move(required_extensions), extension_properties,
               [](const auto& prop) noexcept -> auto
               { return prop.extensionName.data(); },
               "Required extension is not supported");
-          });
+          })
+        .transform(vk_utils::store_into(required_extensions));
   }
 
   auto
@@ -350,8 +347,7 @@ private:
     return //
       vk_utils::check_vk_result(context_.createInstance(create_info),
         "Failed to create Vulkan instance, with result: {}")
-        .transform([ this ](auto instance) noexcept -> auto
-          { instance_ = std::move(instance); });
+        .transform(vk_utils::store_into(instance_));
   }
 
   void

@@ -10,20 +10,6 @@
 
 namespace vk_utils
 {
-/* template<typename ResultValueType, typename MsgFunc>
-auto
-check_vk_result(ResultValueType result_value, MsgFunc msg_func)
-  -> std::expected<std::remove_reference_t<decltype(result_value.value)>,
-    std::string>
-{
-  using ValueType = std::remove_reference_t<decltype(result_value.value)>;
-  if (result_value.result != vk::Result::eSuccess)
-  {
-    return std::expected<ValueType, std::string> { std::unexpect,
-      msg_func(result_value.result) };
-  }
-  return std::move(result_value.value);
-} */
 
 template<typename ResultValueType>
 auto
