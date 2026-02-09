@@ -6,11 +6,13 @@
 #include <expected>
 #include <format>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <print>
 #include <ranges>
 #include <string>
 #include <utility>
+#include <vector>
 
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS 1
 #define VULKAN_HPP_NO_EXCEPTIONS
@@ -22,10 +24,10 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
-#include <vk_utils.hpp>
+#include "vk_utils.hpp"
 
-static constexpr std::uint32_t width { 800 };
-static constexpr std::uint32_t height { 600 };
+static constexpr std::uint32_t initial_width { 800 };
+static constexpr std::uint32_t initial_height { 600 };
 
 static constexpr std::array validation_layers { "VK_LAYER_KHRONOS_validation" };
 static constexpr std::array device_extensions { vk::KHRSwapchainExtensionName };
@@ -65,7 +67,8 @@ private:
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 
-    window_ = glfwCreateWindow(width, height, "Vulkan", nullptr, nullptr);
+    window_ = glfwCreateWindow(
+      initial_width, initial_height, "Vulkan", nullptr, nullptr);
 
     return {};
   }
@@ -81,7 +84,9 @@ private:
       .and_then([ this ] -> std::expected<void, std::string>
         { return pick_physical_device(); })
       .and_then([ this ] -> std::expected<void, std::string>
-        { return create_logical_device(); });
+        { return create_logical_device(); })
+      .and_then([ this ] -> std::expected<void, std::string>
+        { return create_swap_chain(); });
   }
 
   void
@@ -227,17 +232,45 @@ private:
       physical_device_.createDevice(device_create_info),
       "Failed to create logical device, with result: {}")
       .transform(
-        [ this, graphics_index ](auto device) noexcept -> auto
+        [ this, graphics_index ](auto&& device) noexcept -> auto
         {
-          device_ = std::move(device);
+          device_ = std::forward<decltype(device)>(device);
           graphics_queue_ = device_.getQueue(*graphics_index, 0);
+          // presentation_queue_ = device_.getQueue(*presentation_index, 0);
         });
   }
 
   auto
-  get_required_layers() -> std::expected<std::vector<const char*>, std::string>
+  create_swap_chain() -> std::expected<void, std::string>
   {
-    std::vector<const char*> required_layers;
+    vk::SurfaceCapabilitiesKHR surface_capabilities;
+    std::vector<vk::SurfaceFormatKHR> surface_formats;
+    std::vector<vk::PresentModeKHR> surface_presentation_modes;
+
+    return get_surface_capabilities(surface_capabilities)
+      .and_then([ &, this ]() noexcept -> auto
+        { return get_surface_formats(surface_formats); })
+      .and_then([ &, this ]() noexcept -> auto
+        { return get_surface_present_modes(surface_presentation_modes); })
+      .transform(
+        [ &, this ]() noexcept -> void
+        {
+          swap_chain_extent_ = choose_swap_extent(surface_capabilities);
+          swap_chain_surface_format_ =
+            choose_swap_surface_format(surface_formats);
+        })
+      .and_then(
+        [ &, this ]() noexcept -> std::expected<void, std::string>
+        {
+          return create_swap_chain(
+            surface_capabilities, surface_presentation_modes);
+        });
+  }
+
+  auto
+  get_required_layers(std::vector<const char*>& required_layers)
+    -> std::expected<void, std::string>
+  {
     if constexpr (enable_validation_layers)
     {
       required_layers.assign_range(validation_layers);
@@ -422,7 +455,152 @@ private:
     return std::make_pair(graphics_index, presentation_index);
   }
 
+  auto
+  choose_swap_surface_format(
+    std::span<const vk::SurfaceFormatKHR> available_formats)
+    -> vk::SurfaceFormatKHR
+  {
+    if (const auto format = std::ranges::find_if(available_formats,
+          [](const vk::SurfaceFormatKHR& available_format) noexcept -> bool
+          {
+            return available_format.format == vk::Format::eB8G8R8A8Srgb &&
+              available_format.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear;
+          });
+      format != available_formats.end())
+    {
+      return *format;
+    }
+    return available_formats[ 0 ];
+  }
+
+  auto
+  choose_swap_presentation_mode(
+    std::span<const vk::PresentModeKHR> available_presentation_modes)
+    -> vk::PresentModeKHR
+  {
+    if (const auto mode = std::ranges::find(
+          available_presentation_modes, vk::PresentModeKHR::eMailbox);
+      mode != available_presentation_modes.end())
+    {
+      return *mode;
+    }
+    return vk::PresentModeKHR::eFifo;
+  }
+
+  auto
+  choose_swap_extent(const vk::SurfaceCapabilitiesKHR& capabilities)
+    -> vk::Extent2D
+  {
+    if (capabilities.currentExtent.width !=
+      std::numeric_limits<std::uint32_t>::max())
+    {
+      return capabilities.currentExtent;
+    }
+
+    std::int32_t width {};
+    std::int32_t height {};
+    glfwGetFramebufferSize(window_, &width, &height);
+
+    return vk::Extent2D {
+      .width = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(width),
+        capabilities.minImageExtent.width, capabilities.maxImageExtent.width),
+      .height = std::clamp<std::uint32_t>(static_cast<std::uint32_t>(height),
+        capabilities.minImageExtent.height, capabilities.maxImageExtent.height),
+    };
+  }
+
+  static auto
+  choose_swap_min_image_count(
+    const vk::SurfaceCapabilitiesKHR& surface_capabilities) -> std::uint32_t
+  {
+    auto min_image_count = std::max(3U, surface_capabilities.minImageCount);
+    if ((0 < surface_capabilities.maxImageCount) &&
+      (surface_capabilities.maxImageCount < min_image_count))
+    {
+      min_image_count = surface_capabilities.maxImageCount;
+    }
+    return min_image_count;
+  }
+
+  auto
+  get_surface_capabilities(vk::SurfaceCapabilitiesKHR& surface_capabilities)
+    -> std::expected<void, std::string>
+  {
+    return vk_utils::check_vk_result(
+      physical_device_.getSurfaceCapabilitiesKHR(*surface_),
+      "Failed to acquire surface capabilities")
+      .transform(vk_utils::store_into(surface_capabilities));
+  }
+
+  auto
+  get_surface_formats(std::vector<vk::SurfaceFormatKHR>& surface_formats)
+    -> std::expected<void, std::string>
+  {
+    return vk_utils::check_vk_result(
+      physical_device_.getSurfaceFormatsKHR(*surface_),
+      "Failed to acquire surface formats")
+      .transform(vk_utils::store_into(surface_formats));
+  }
+
+  auto
+  get_surface_present_modes(
+    std::vector<vk::PresentModeKHR>& surface_presentation_modes)
+    -> std::expected<void, std::string>
+  {
+    return vk_utils::check_vk_result(
+      physical_device_.getSurfacePresentModesKHR(*surface_),
+      "Failed to acquire surface presentation modes")
+      .transform(vk_utils::store_into(surface_presentation_modes));
+  }
+
+  auto
+  create_swap_chain(const vk::SurfaceCapabilitiesKHR& surface_capabilities,
+    std::span<const vk::PresentModeKHR> surface_presentation_modes)
+    -> std::expected<void, std::string>
+  {
+    vk::SwapchainCreateInfoKHR swap_chain_create_info {
+      .flags = vk::SwapchainCreateFlagsKHR(),
+      .surface = *surface_,
+      .minImageCount = choose_swap_min_image_count(surface_capabilities),
+      .imageFormat = swap_chain_surface_format_.format,
+      .imageColorSpace = swap_chain_surface_format_.colorSpace,
+      .imageExtent = swap_chain_extent_,
+      .imageArrayLayers = 1U,
+      .imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
+      .imageSharingMode = vk::SharingMode::eExclusive,
+      .preTransform = surface_capabilities.currentTransform,
+      .compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque,
+      .presentMode = choose_swap_presentation_mode(surface_presentation_modes),
+      .clipped = vk::True,
+      .oldSwapchain = nullptr,
+    };
+
+    return create_swap_chain_impl(swap_chain_create_info)
+      .and_then([ this ]() -> std::expected<void, std::string>
+        { return get_swap_chain_images(); });
+  }
+
+  auto
+  create_swap_chain_impl(
+    const vk::SwapchainCreateInfoKHR& swap_chain_create_info)
+    -> std::expected<void, std::string>
+  {
+    return vk_utils::check_vk_result(
+      device_.createSwapchainKHR(swap_chain_create_info),
+      "Failed to create swap chain")
+      .transform(vk_utils::store_into(swap_chain_));
+  }
+
+  auto
+  get_swap_chain_images() -> std::expected<void, std::string>
+  {
+    return vk_utils::check_vk_result(
+      swap_chain_.getImages(), "Failed to get swap chain images")
+      .transform(vk_utils::store_into(swap_chain_images_));
+  }
+
 private:
+  // 8 bytes alignment
   GLFWwindow* window_ {};
   vk::raii::Context context_;
   vk::raii::Instance instance_ { nullptr };
@@ -432,4 +610,11 @@ private:
   vk::raii::Device device_ { nullptr };
   vk::raii::Queue graphics_queue_ { nullptr };
   vk::raii::Queue presentation_queue_ { nullptr };
+  vk::raii::SwapchainKHR swap_chain_ { nullptr };
+  std::vector<vk::Image> swap_chain_images_;
+  std::vector<vk::raii::ImageView> swap_chain_image_views_;
+
+  // 4 bytes alignment
+  vk::SurfaceFormatKHR swap_chain_surface_format_ {};
+  vk::Extent2D swap_chain_extent_ {};
 };

@@ -43,6 +43,14 @@ check_vk_result(ResultValueType result_value, std::string_view message)
   return std::move(result_value.value);
 }
 
+template<typename T>
+auto
+store_into(T& out)
+{
+  return [ &out ](auto&& value) noexcept -> void
+  { out = std::forward<decltype(value)>(value); };
+}
+
 template<typename Properties, typename Projection>
 auto
 validate_required(std::vector<const char*> required,
