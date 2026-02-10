@@ -86,7 +86,9 @@ private:
       .and_then([ this ] -> std::expected<void, std::string>
         { return create_logical_device(); })
       .and_then([ this ] -> std::expected<void, std::string>
-        { return create_swap_chain(); });
+        { return create_swap_chain(); })
+      .and_then([ this ] -> std::expected<void, std::string>
+        { return create_image_views(); });
   }
 
   constexpr void
@@ -265,6 +267,46 @@ private:
           return create_swap_chain(
             surface_capabilities, surface_presentation_modes);
         });
+  }
+
+  constexpr auto
+  create_image_views() -> std::expected<void, std::string>
+  {
+    swap_chain_image_views_.clear();
+
+    vk::ImageViewCreateInfo image_view_create_info {
+      .pNext = {},
+      .flags = {},
+      .image = {},
+      .viewType = vk::ImageViewType::e2D,
+      .format = swap_chain_surface_format_.format,
+      .components = {},
+      .subresourceRange {
+        .aspectMask = vk::ImageAspectFlagBits::eColor,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+      },
+    };
+
+    for (const auto& image : swap_chain_images_)
+    {
+      image_view_create_info.image = image;
+      auto image_view = vk_utils::check_vk_result(
+        device_.createImageView(image_view_create_info),
+        "Failed to create image view");
+      if (!image_view.has_value()) [[unlikely]]
+      {
+        return std::expected<void, std::string> {
+          std::unexpect,
+          image_view.error(),
+        };
+      }
+      swap_chain_image_views_.emplace_back(std::move(image_view.value()));
+    }
+
+    return {};
   }
 
   constexpr auto
