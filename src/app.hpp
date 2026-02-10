@@ -48,7 +48,7 @@ public:
       init_window().and_then(
         [ this ] -> std::expected<void, std::string> { return init_vulkan(); });
 
-    if (!init_result.has_value())
+    if (!init_result.has_value()) [[unlikely]]
     {
       std::println(std::cerr,
         "Failed to initialize application, with error: {}",
@@ -154,6 +154,7 @@ private:
   {
     VkSurfaceKHR _surface {};
     if (glfwCreateWindowSurface(*instance_, window_, nullptr, &_surface) != 0)
+      [[unlikely]]
     {
       return std::expected<void, std::string> {
         std::unexpect,

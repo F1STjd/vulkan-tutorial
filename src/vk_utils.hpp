@@ -18,7 +18,7 @@ check_vk_result(ResultValueType result_value, std::string_view message)
     std::string>
 {
   using ValueType = std::remove_reference_t<decltype(result_value.value)>;
-  if (result_value.result != vk::Result::eSuccess)
+  if (result_value.result != vk::Result::eSuccess) [[unlikely]]
   {
     auto result_str = vk::to_string(result_value.result);
     return std::expected<ValueType, std::string> {
@@ -47,6 +47,7 @@ auto constexpr validate_required(std::vector<const char*> required,
     if (std::ranges::none_of(available,
           [ required_item, &proj ](const auto& property) noexcept -> bool
           { return std::strcmp(proj(property), required_item) == 0; }))
+      [[unlikely]]
     {
       return std::expected<std::vector<const char*>, std::string> {
         std::unexpect, std::format("{}: {}", error_prefix, required_item)
