@@ -41,7 +41,7 @@ static constexpr bool enable_validation_layers { true };
 struct app
 {
 public:
-  void
+  constexpr void
   run()
   {
     auto init_result = //
@@ -60,7 +60,7 @@ public:
   }
 
 private:
-  auto
+  constexpr auto
   init_window() -> std::expected<void, std::string>
   {
     glfwInit();
@@ -73,7 +73,7 @@ private:
     return {};
   }
 
-  auto
+  constexpr auto
   init_vulkan() -> std::expected<void, std::string>
   {
     return create_instance()
@@ -89,7 +89,7 @@ private:
         { return create_swap_chain(); });
   }
 
-  void
+  constexpr void
   main_loop()
   {
     while (glfwWindowShouldClose(window_) == 0)
@@ -98,14 +98,14 @@ private:
     }
   }
 
-  void
+  constexpr void
   cleanup()
   {
     glfwDestroyWindow(window_);
     glfwTerminate();
   }
 
-  auto
+  constexpr auto
   create_instance() -> std::expected<void, std::string>
   {
     std::vector<const char*> layers;
@@ -118,26 +118,27 @@ private:
         { return create_vulkan_instance(layers, extensions); });
   }
 
-  auto
+  constexpr auto
   setup_debug_messenger() -> std::expected<void, std::string>
   {
     if (!enable_validation_layers) { return {}; }
 
-    vk::DebugUtilsMessageSeverityFlagsEXT severity_flags {
+    constexpr vk::DebugUtilsMessageSeverityFlagsEXT severity_flags {
       vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose |
       vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning |
       vk::DebugUtilsMessageSeverityFlagBitsEXT::eError
     };
-    vk::DebugUtilsMessageTypeFlagsEXT message_type_flags {
+    constexpr vk::DebugUtilsMessageTypeFlagsEXT message_type_flags {
       vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
       vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance |
       vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation
     };
-    vk::DebugUtilsMessengerCreateInfoEXT debug_utils_messenger_create_info_EXT {
-      .messageSeverity = severity_flags,
-      .messageType = message_type_flags,
-      .pfnUserCallback = &debug_callback
-    };
+    constexpr vk::DebugUtilsMessengerCreateInfoEXT
+      debug_utils_messenger_create_info_EXT {
+        .messageSeverity = severity_flags,
+        .messageType = message_type_flags,
+        .pfnUserCallback = &debug_callback,
+      };
 
     return //
       vk_utils::check_vk_result(instance_.createDebugUtilsMessengerEXT(
@@ -146,7 +147,7 @@ private:
         .transform(vk_utils::store_into(debug_messenger_));
   }
 
-  auto
+  constexpr auto
   create_surface() -> std::expected<void, std::string>
   {
     VkSurfaceKHR _surface {};
@@ -162,7 +163,7 @@ private:
     return {};
   }
 
-  auto
+  constexpr auto
   pick_physical_device() -> std::expected<void, std::string>
   {
     return //
@@ -184,10 +185,11 @@ private:
           });
   }
 
-  auto
+  constexpr auto
   create_logical_device() -> std::expected<void, std::string>
   {
-    auto [ graphics_index, presentation_index ] = get_queue_family_indices();
+    const auto [ graphics_index, presentation_index ] =
+      get_queue_family_indices();
 
     if (!graphics_index || !presentation_index)
     {
@@ -238,7 +240,7 @@ private:
         });
   }
 
-  auto
+  constexpr auto
   create_swap_chain() -> std::expected<void, std::string>
   {
     vk::SurfaceCapabilitiesKHR surface_capabilities;
@@ -265,7 +267,7 @@ private:
         });
   }
 
-  auto
+  constexpr auto
   get_required_layers(std::vector<const char*>& required_layers)
     -> std::expected<void, std::string>
   {
@@ -289,12 +291,12 @@ private:
         .transform(vk_utils::store_into(required_layers));
   }
 
-  auto
+  constexpr auto
   get_required_extensions(std::vector<const char*>& required_extensions)
     -> std::expected<void, std::string>
   {
     std::uint32_t glfw_extension_count {};
-    auto* glfw_extensions =
+    const auto* glfw_extensions =
       glfwGetRequiredInstanceExtensions(&glfw_extension_count);
 
     required_extensions.reserve(glfw_extension_count + 1U);
@@ -324,7 +326,7 @@ private:
         .transform(vk_utils::store_into(required_extensions));
   }
 
-  auto
+  constexpr auto
   create_vulkan_instance(std::span<const char* const> layers,
     std::span<const char* const> extensions) -> std::expected<void, std::string>
   {
@@ -336,7 +338,7 @@ private:
       .apiVersion = vk::ApiVersion14,
     };
 
-    vk::InstanceCreateInfo create_info {
+    const vk::InstanceCreateInfo create_info {
       .pApplicationInfo = &app_info,
       .enabledLayerCount = static_cast<std::uint32_t>(layers.size()),
       .ppEnabledLayerNames = layers.data(),
@@ -350,7 +352,7 @@ private:
         .transform(vk_utils::store_into(instance_));
   }
 
-  void
+  constexpr void
   print_extensions(std::span<const vk::ExtensionProperties> extensions)
   {
     for (const auto& extension : extensions)
@@ -359,7 +361,7 @@ private:
     }
   }
 
-  static VKAPI_ATTR auto VKAPI_CALL
+  static constexpr VKAPI_ATTR auto VKAPI_CALL
   debug_callback(
     [[maybe_unused]] vk::DebugUtilsMessageSeverityFlagBitsEXT severity,
     vk::DebugUtilsMessageTypeFlagsEXT type,
@@ -372,23 +374,23 @@ private:
     return vk::False;
   }
 
-  auto
+  constexpr auto
   is_device_suitable(const vk::raii::PhysicalDevice& device) -> bool
   {
     return has_minimum_api_version(device) &&
       has_graphics_queue_family(device) && has_required_extensions(device);
   }
 
-  auto
+  constexpr auto
   has_minimum_api_version(const vk::raii::PhysicalDevice& device) -> bool
   {
     return device.getProperties().apiVersion >= VK_API_VERSION_1_3;
   }
 
-  auto
+  constexpr auto
   has_graphics_queue_family(const vk::raii::PhysicalDevice& device) -> bool
   {
-    auto queue_families = device.getQueueFamilyProperties();
+    const auto queue_families = device.getQueueFamilyProperties();
     return std::ranges::any_of(queue_families,
       [](const vk::QueueFamilyProperties& qfp) noexcept -> bool
       {
@@ -397,10 +399,10 @@ private:
       });
   }
 
-  auto
+  constexpr auto
   has_required_extensions(const vk::raii::PhysicalDevice& device) -> bool
   {
-    auto extensions_result =
+    const auto extensions_result =
       vk_utils::check_vk_result(device.enumerateDeviceExtensionProperties(),
         "Failed to enumerate device extensions: {}");
 
@@ -416,14 +418,14 @@ private:
       });
   }
 
-  auto
+  constexpr auto
   get_queue_family_indices()
     -> std::pair<std::optional<std::uint32_t>, std::optional<std::uint32_t>>
   {
     std::optional<std::uint32_t> graphics_index;
     std::optional<std::uint32_t> presentation_index;
 
-    auto queue_families = physical_device_.getQueueFamilyProperties();
+    const auto queue_families = physical_device_.getQueueFamilyProperties();
 
     for (const auto& [ index, qfp ] : queue_families | std::views::enumerate)
     {
@@ -451,7 +453,7 @@ private:
     return std::make_pair(graphics_index, presentation_index);
   }
 
-  auto
+  constexpr auto
   choose_swap_surface_format(
     std::span<const vk::SurfaceFormatKHR> available_formats)
     -> vk::SurfaceFormatKHR
@@ -469,7 +471,7 @@ private:
     return available_formats[ 0 ];
   }
 
-  auto
+  constexpr auto
   choose_swap_presentation_mode(
     std::span<const vk::PresentModeKHR> available_presentation_modes)
     -> vk::PresentModeKHR
@@ -483,7 +485,7 @@ private:
     return vk::PresentModeKHR::eFifo;
   }
 
-  auto
+  constexpr auto
   choose_swap_extent(const vk::SurfaceCapabilitiesKHR& capabilities)
     -> vk::Extent2D
   {
@@ -505,7 +507,7 @@ private:
     };
   }
 
-  static auto
+  static constexpr auto
   choose_swap_min_image_count(
     const vk::SurfaceCapabilitiesKHR& surface_capabilities) -> std::uint32_t
   {
@@ -518,7 +520,7 @@ private:
     return min_image_count;
   }
 
-  auto
+  constexpr auto
   get_surface_capabilities(vk::SurfaceCapabilitiesKHR& surface_capabilities)
     -> std::expected<void, std::string>
   {
@@ -528,7 +530,7 @@ private:
       .transform(vk_utils::store_into(surface_capabilities));
   }
 
-  auto
+  constexpr auto
   get_surface_formats(std::vector<vk::SurfaceFormatKHR>& surface_formats)
     -> std::expected<void, std::string>
   {
@@ -538,7 +540,7 @@ private:
       .transform(vk_utils::store_into(surface_formats));
   }
 
-  auto
+  constexpr auto
   get_surface_present_modes(
     std::vector<vk::PresentModeKHR>& surface_presentation_modes)
     -> std::expected<void, std::string>
@@ -549,12 +551,12 @@ private:
       .transform(vk_utils::store_into(surface_presentation_modes));
   }
 
-  auto
+  constexpr auto
   create_swap_chain(const vk::SurfaceCapabilitiesKHR& surface_capabilities,
     std::span<const vk::PresentModeKHR> surface_presentation_modes)
     -> std::expected<void, std::string>
   {
-    vk::SwapchainCreateInfoKHR swap_chain_create_info {
+    const vk::SwapchainCreateInfoKHR swap_chain_create_info {
       .flags = vk::SwapchainCreateFlagsKHR(),
       .surface = *surface_,
       .minImageCount = choose_swap_min_image_count(surface_capabilities),
@@ -576,7 +578,7 @@ private:
         { return get_swap_chain_images(); });
   }
 
-  auto
+  constexpr auto
   create_swap_chain_impl(
     const vk::SwapchainCreateInfoKHR& swap_chain_create_info)
     -> std::expected<void, std::string>
@@ -587,7 +589,7 @@ private:
       .transform(vk_utils::store_into(swap_chain_));
   }
 
-  auto
+  constexpr auto
   get_swap_chain_images() -> std::expected<void, std::string>
   {
     return vk_utils::check_vk_result(

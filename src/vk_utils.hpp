@@ -12,7 +12,7 @@ namespace vk_utils
 {
 
 template<typename ResultValueType>
-auto
+constexpr auto
 check_vk_result(ResultValueType result_value, std::string_view message)
   -> std::expected<std::remove_reference_t<decltype(result_value.value)>,
     std::string>
@@ -30,7 +30,7 @@ check_vk_result(ResultValueType result_value, std::string_view message)
 }
 
 template<typename T>
-auto
+constexpr auto
 store_into(T& out)
 {
   return [ &out ](auto&& value) noexcept -> void
@@ -38,8 +38,7 @@ store_into(T& out)
 }
 
 template<typename Properties, typename Projection>
-auto
-validate_required(std::vector<const char*> required,
+auto constexpr validate_required(std::vector<const char*> required,
   const Properties& available, Projection proj, std::string_view error_prefix)
   -> std::expected<std::vector<const char*>, std::string>
 {
