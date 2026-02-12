@@ -68,6 +68,7 @@ target_compile_definitions(
   main PUBLIC
   VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
   VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
+  SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders"
 )
 
 target_link_libraries(
@@ -148,7 +149,7 @@ target_compile_options(main PRIVATE
   >
 )
 
-# Link stdc++exp for GCC experimental features (import std) on Windows
+# Link stdc++exp for GCC experimental features (std::println) on Windows
 target_link_libraries(main PRIVATE
   $<$<AND:$<CXX_COMPILER_ID:GNU>,$<PLATFORM_ID:Windows>>:stdc++exp>
 )
@@ -162,3 +163,5 @@ set_target_properties(main PROPERTIES
 )
 
 add_subdirectory(src)
+add_subdirectory(lib)
+add_subdirectory(shaders)

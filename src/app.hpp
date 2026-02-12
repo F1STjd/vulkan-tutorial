@@ -1,5 +1,6 @@
 #pragma once
 
+#include "app_utils.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
@@ -10,12 +11,12 @@
 #include <optional>
 #include <print>
 #include <ranges>
-#include <string>
 #include <utility>
 #include <vector>
 
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS 1
 #define VULKAN_HPP_NO_EXCEPTIONS
+#define VULKAN_HPP_USE_STD_EXPECTED
 #include "vulkan/vulkan.hpp"
 #include <vulkan/vk_platform.h>
 #include <vulkan/vulkan_core.h>
@@ -24,6 +25,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
+#include "../lib/load/load.hpp"
 #include "vk_utils.hpp"
 
 static constexpr std::uint32_t initial_width { 800 };
@@ -45,14 +47,21 @@ public:
   run()
   {
     auto init_result = //
-      init_window().and_then(
-        [ this ] -> std::expected<void, std::string> { return init_vulkan(); });
+      init_window().and_then([ this ] -> std::expected<void, vk_utils::error>
+        { return init_vulkan(); });
 
     if (!init_result.has_value()) [[unlikely]]
     {
+      const auto& error = init_result.error();
+      const auto& file = error.location.file_name();
+      const auto& function = error.location.function_name();
+      const auto& line = error.location.line();
+      const auto& column = error.location.column();
+
       std::println(std::cerr,
-        "Failed to initialize application, with error: {}",
-        init_result.error());
+        "{}: In function '{}':\n{}:{}:{}: error: during initialisation of an "
+        "Vulkan object got result code: {}",
+        file, function, file, line, column, error.to_string());
       std::exit(EXIT_FAILURE);
     }
     main_loop();
@@ -60,8 +69,9 @@ public:
   }
 
 private:
+  // TODO(Konrad): change error type to some glfw related one
   constexpr auto
-  init_window() -> std::expected<void, std::string>
+  init_window() -> std::expected<void, vk_utils::error>
   {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -74,21 +84,16 @@ private:
   }
 
   constexpr auto
-  init_vulkan() -> std::expected<void, std::string>
+  init_vulkan() -> std::expected<void, vk_utils::error>
   {
     return create_instance()
-      .and_then([ this ] -> std::expected<void, std::string>
-        { return setup_debug_messenger(); })
-      .and_then([ this ] -> std::expected<void, std::string>
-        { return create_surface(); })
-      .and_then([ this ] -> std::expected<void, std::string>
-        { return pick_physical_device(); })
-      .and_then([ this ] -> std::expected<void, std::string>
-        { return create_logical_device(); })
-      .and_then([ this ] -> std::expected<void, std::string>
-        { return create_swap_chain(); })
-      .and_then([ this ] -> std::expected<void, std::string>
-        { return create_image_views(); });
+      .and_then([ this ] { return setup_debug_messenger(); })
+      .and_then([ this ] { return create_surface(); })
+      .and_then([ this ] { return pick_physical_device(); })
+      .and_then([ this ] { return create_logical_device(); })
+      .and_then([ this ] { return create_swap_chain(); })
+      .and_then([ this ] { return create_image_views(); })
+      .and_then([ this ] { return create_graphics_pipeline(); });
   }
 
   constexpr void
@@ -108,20 +113,20 @@ private:
   }
 
   constexpr auto
-  create_instance() -> std::expected<void, std::string>
+  create_instance() -> std::expected<void, vk_utils::error>
   {
     std::vector<const char*> layers;
     std::vector<const char*> extensions;
 
     return get_required_layers(layers)
-      .and_then([ &, this ]() -> std::expected<void, std::string>
+      .and_then([ &, this ]() -> std::expected<void, vk_utils::error>
         { return get_required_extensions(extensions); })
-      .and_then([ &, this ]() -> std::expected<void, std::string>
+      .and_then([ &, this ]() -> std::expected<void, vk_utils::error>
         { return create_vulkan_instance(layers, extensions); });
   }
 
   constexpr auto
-  setup_debug_messenger() -> std::expected<void, std::string>
+  setup_debug_messenger() -> std::expected<void, vk_utils::error>
   {
     if (!enable_validation_layers) { return {}; }
 
@@ -136,29 +141,27 @@ private:
       vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation
     };
     constexpr vk::DebugUtilsMessengerCreateInfoEXT
-      debug_utils_messenger_create_info_EXT {
+      debug_utils_messenger_info_EXT {
         .messageSeverity = severity_flags,
         .messageType = message_type_flags,
         .pfnUserCallback = &debug_callback,
       };
 
-    return //
-      vk_utils::check_vk_result(instance_.createDebugUtilsMessengerEXT(
-                                  debug_utils_messenger_create_info_EXT),
-        "Failed to create debug messenger, with result: {}")
-        .transform(vk_utils::store_into(debug_messenger_));
+    return vk_utils::locate(
+      instance_.createDebugUtilsMessengerEXT(debug_utils_messenger_info_EXT))
+      .transform(vk_utils::store_into(debug_messenger_));
   }
 
   constexpr auto
-  create_surface() -> std::expected<void, std::string>
+  create_surface() -> std::expected<void, vk_utils::error>
   {
     VkSurfaceKHR _surface {};
     if (glfwCreateWindowSurface(*instance_, window_, nullptr, &_surface) != 0)
       [[unlikely]]
     {
-      return std::expected<void, std::string> {
+      return std::expected<void, vk_utils::error> {
         std::unexpect,
-        std::format("Failed to create window surface"),
+        app_utils::error::glfw_surface_creation_failed,
       };
     }
 
@@ -167,13 +170,12 @@ private:
   }
 
   constexpr auto
-  pick_physical_device() -> std::expected<void, std::string>
+  pick_physical_device() -> std::expected<void, vk_utils::error>
   {
     return //
-      vk_utils::check_vk_result(instance_.enumeratePhysicalDevices(),
-        "Failed to enumerate physical devices: {}")
+      vk_utils::locate(instance_.enumeratePhysicalDevices())
         .and_then(
-          [ this ](const auto& devices) -> std::expected<void, std::string>
+          [ this ](const auto& devices) -> std::expected<void, vk_utils::error>
           {
             for (const auto& device : devices)
             {
@@ -183,22 +185,24 @@ private:
                 return {};
               }
             }
-            return std::expected<void, std::string> { std::unexpect,
-              "Failed to find suitable GPU" };
+            return std::expected<void, vk_utils::error> {
+              std::unexpect,
+              app_utils::error::no_suitable_gpu,
+            };
           });
   }
 
   constexpr auto
-  create_logical_device() -> std::expected<void, std::string>
+  create_logical_device() -> std::expected<void, vk_utils::error>
   {
     const auto [ graphics_index, presentation_index ] =
       get_queue_family_indices();
 
     if (!graphics_index || !presentation_index)
     {
-      return std::expected<void, std::string> {
+      return std::expected<void, vk_utils::error> {
         std::unexpect,
-        "Could not find required queue families",
+        app_utils::error::missing_queue_families,
       };
     }
 
@@ -216,24 +220,22 @@ private:
     };
 
     constexpr auto queue_priority { 0.5F };
-    vk::DeviceQueueCreateInfo device_queue_create_info {
+    vk::DeviceQueueCreateInfo device_queue_info {
       .queueFamilyIndex = *graphics_index,
       .queueCount = 1,
       .pQueuePriorities = &queue_priority,
     };
 
-    vk::DeviceCreateInfo device_create_info {
+    vk::DeviceCreateInfo device_info {
       .pNext = &feature_chain.get(),
       .queueCreateInfoCount = 1,
-      .pQueueCreateInfos = &device_queue_create_info,
+      .pQueueCreateInfos = &device_queue_info,
       .enabledExtensionCount =
         static_cast<std::uint32_t>(device_extensions.size()),
       .ppEnabledExtensionNames = device_extensions.data(),
     };
 
-    return vk_utils::check_vk_result(
-      physical_device_.createDevice(device_create_info),
-      "Failed to create logical device, with result: {}")
+    return vk_utils::locate(physical_device_.createDevice(device_info))
       .transform(
         [ this, graphics_index ](auto&& device) noexcept -> auto
         {
@@ -244,7 +246,7 @@ private:
   }
 
   constexpr auto
-  create_swap_chain() -> std::expected<void, std::string>
+  create_swap_chain() -> std::expected<void, vk_utils::error>
   {
     vk::SurfaceCapabilitiesKHR surface_capabilities;
     std::vector<vk::SurfaceFormatKHR> surface_formats;
@@ -263,7 +265,7 @@ private:
             choose_swap_surface_format(surface_formats);
         })
       .and_then(
-        [ &, this ]() noexcept -> std::expected<void, std::string>
+        [ &, this ]() noexcept -> std::expected<void, vk_utils::error>
         {
           return create_swap_chain(
             surface_capabilities, surface_presentation_modes);
@@ -271,11 +273,11 @@ private:
   }
 
   constexpr auto
-  create_image_views() -> std::expected<void, std::string>
+  create_image_views() -> std::expected<void, vk_utils::error>
   {
     swap_chain_image_views_.clear();
 
-    vk::ImageViewCreateInfo image_view_create_info {
+    vk::ImageViewCreateInfo image_view_info {
       .pNext = {},
       .flags = {},
       .image = {},
@@ -293,16 +295,12 @@ private:
 
     for (const auto& image : swap_chain_images_)
     {
-      image_view_create_info.image = image;
-      auto image_view = vk_utils::check_vk_result(
-        device_.createImageView(image_view_create_info),
-        "Failed to create image view");
+      image_view_info.image = image;
+      auto image_view =
+        vk_utils::locate(device_.createImageView(image_view_info));
       if (!image_view.has_value()) [[unlikely]]
       {
-        return std::expected<void, std::string> {
-          std::unexpect,
-          image_view.error(),
-        };
+        return std::unexpected { image_view.error() };
       }
       swap_chain_image_views_.emplace_back(std::move(image_view.value()));
     }
@@ -311,8 +309,133 @@ private:
   }
 
   constexpr auto
+  create_graphics_pipeline() -> std::expected<void, vk_utils::error>
+  {
+    auto shader_module_result = //
+      vk_utils::locate(load::shader({ SHADER_DIR "/slang.spv" }))
+        .and_then([ this ](std::span<const char> code) -> auto
+          { return create_shader_module(code); });
+
+    if (!shader_module_result.has_value()) [[unlikely]]
+    {
+      return std::expected<void, vk_utils::error> {
+        std::unexpect,
+        shader_module_result.error(),
+      };
+    }
+
+    const auto& shader_module = *shader_module_result;
+
+    std::array shader_stages_info {
+      vk::PipelineShaderStageCreateInfo {
+        .stage = vk::ShaderStageFlagBits::eVertex,
+        .module = shader_module,
+        .pName = "vertex_main",
+        .pSpecializationInfo = nullptr,
+      },
+      vk::PipelineShaderStageCreateInfo {
+        .stage = vk::ShaderStageFlagBits::eFragment,
+        .module = shader_module,
+        .pName = "fragment_main",
+        .pSpecializationInfo = nullptr,
+      },
+    };
+
+    vk::PipelineVertexInputStateCreateInfo vertex_input_info;
+    vk::PipelineInputAssemblyStateCreateInfo input_assembly {
+      .topology = vk::PrimitiveTopology::eTriangleList
+    };
+
+    vk::PipelineViewportStateCreateInfo viewport_state_info {
+      .flags = {},
+      .viewportCount = 1,
+      .pViewports = {},
+      .scissorCount = 1,
+      .pScissors = {},
+    };
+
+    vk::PipelineRasterizationStateCreateInfo rasterizer_info {
+      .depthClampEnable = vk::False,
+      .rasterizerDiscardEnable = vk::False,
+      .polygonMode = vk::PolygonMode::eFill,
+      .cullMode = vk::CullModeFlagBits::eBack,
+      .frontFace = vk::FrontFace::eClockwise,
+      .depthBiasEnable = vk::False,
+      .depthBiasSlopeFactor = 1.0F,
+      .lineWidth = 1.0F,
+    };
+
+    vk::PipelineMultisampleStateCreateInfo multisampling_info {
+      .rasterizationSamples = vk::SampleCountFlagBits::e1,
+      .sampleShadingEnable = vk::False,
+    };
+
+    vk::PipelineColorBlendAttachmentState color_blend_attachment_info {
+      .blendEnable = vk::False,
+      .colorWriteMask = vk::ColorComponentFlagBits::eR |
+        vk::ColorComponentFlagBits::eG | vk::ColorComponentFlagBits::eB |
+        vk::ColorComponentFlagBits::eA,
+    };
+
+    vk::PipelineColorBlendStateCreateInfo color_blending_info {
+      .logicOpEnable = vk::False,
+      .logicOp = vk::LogicOp::eCopy,
+      .attachmentCount = 1,
+      .pAttachments = &color_blend_attachment_info,
+    };
+
+    std::array dynamic_states {
+      vk::DynamicState::eViewport,
+      vk::DynamicState::eScissor,
+    };
+
+    vk::PipelineDynamicStateCreateInfo dynamic_state_info {
+      .flags = {},
+      .dynamicStateCount = static_cast<std::uint32_t>(dynamic_states.size()),
+      .pDynamicStates = dynamic_states.data(),
+    };
+
+    vk::PipelineLayoutCreateInfo pipeline_layout_info {
+      .setLayoutCount = 0,
+      .pushConstantRangeCount = 0,
+    };
+
+    return vk_utils::locate(device_.createPipelineLayout(pipeline_layout_info))
+      .transform(vk_utils::store_into(pipeline_layout_))
+      .and_then(
+        [ &, this ]() noexcept -> std::expected<void, vk_utils::error>
+        {
+          vk::PipelineRenderingCreateInfo pipeline_rendering_info {
+            .colorAttachmentCount = 1,
+            .pColorAttachmentFormats = &swap_chain_surface_format_.format,
+          };
+
+          vk::GraphicsPipelineCreateInfo pipeline_info {
+            .pNext = &pipeline_rendering_info,
+            .stageCount = static_cast<std::uint32_t>(shader_stages_info.size()),
+            .pStages = shader_stages_info.data(),
+            .pVertexInputState = &vertex_input_info,
+            .pInputAssemblyState = &input_assembly,
+            .pViewportState = &viewport_state_info,
+            .pRasterizationState = &rasterizer_info,
+            .pMultisampleState = &multisampling_info,
+            .pColorBlendState = &color_blending_info,
+            .pDynamicState = &dynamic_state_info,
+            .layout = *pipeline_layout_,
+            .subpass = 0,
+          };
+
+          return vk_utils::locate(
+            device_.createGraphicsPipeline(nullptr, pipeline_info))
+            .transform(vk_utils::store_into(graphics_pipeline_));
+        });
+  }
+
+  // TODO(Konrad): Refactor - maybe the vk_utils::validate_required is bad
+  // design
+  constexpr auto
   get_required_layers(std::vector<const char*>& required_layers)
-    -> std::expected<void, std::string>
+    -> std::expected<void, vk_utils::error>
   {
     if constexpr (enable_validation_layers)
     {
@@ -320,23 +443,23 @@ private:
     }
 
     return //
-      vk_utils::check_vk_result(context_.enumerateInstanceLayerProperties(),
-        "Failed to enumerate instance layer properties, with result: {} ")
+      vk_utils::locate(context_.enumerateInstanceLayerProperties())
         .and_then(
           [ &required_layers ](const auto& layer_properties) -> auto
           {
-            return vk_utils::validate_required(
-              std::move(required_layers), layer_properties,
-              [](const auto& prop) noexcept -> auto
-              { return prop.layerName.data(); },
-              "Required layer is not supported");
+            return vk_utils::locate(
+              vk_utils::validate_required(std::move(required_layers),
+                layer_properties, [](const auto& prop) noexcept -> auto
+                { return prop.layerName.data(); }));
           })
         .transform(vk_utils::store_into(required_layers));
   }
 
+  // TODO(Konrad): Refactor - maybe the vk_utils::validate_required is bad
+  // design
   constexpr auto
   get_required_extensions(std::vector<const char*>& required_extensions)
-    -> std::expected<void, std::string>
+    -> std::expected<void, vk_utils::error>
   {
     std::uint32_t glfw_extension_count {};
     const auto* glfw_extensions =
@@ -355,23 +478,22 @@ private:
     }
 
     return //
-      vk_utils::check_vk_result(context_.enumerateInstanceExtensionProperties(),
-        "Failed to enumerate instance extension properties, with result: {}")
+      vk_utils::locate(context_.enumerateInstanceExtensionProperties())
         .and_then(
           [ &required_extensions ](const auto& extension_properties) -> auto
           {
-            return vk_utils::validate_required(
-              std::move(required_extensions), extension_properties,
-              [](const auto& prop) noexcept -> auto
-              { return prop.extensionName.data(); },
-              "Required extension is not supported");
+            return vk_utils::locate(
+              vk_utils::validate_required(std::move(required_extensions),
+                extension_properties, [](const auto& prop) noexcept -> auto
+                { return prop.extensionName.data(); }));
           })
         .transform(vk_utils::store_into(required_extensions));
   }
 
   constexpr auto
   create_vulkan_instance(std::span<const char* const> layers,
-    std::span<const char* const> extensions) -> std::expected<void, std::string>
+    std::span<const char* const> extensions)
+    -> std::expected<void, vk_utils::error>
   {
     constexpr vk::ApplicationInfo app_info {
       .pApplicationName = "Hello Triangle",
@@ -381,7 +503,7 @@ private:
       .apiVersion = vk::ApiVersion14,
     };
 
-    const vk::InstanceCreateInfo create_info {
+    const vk::InstanceCreateInfo info {
       .pApplicationInfo = &app_info,
       .enabledLayerCount = static_cast<std::uint32_t>(layers.size()),
       .ppEnabledLayerNames = layers.data(),
@@ -390,8 +512,7 @@ private:
     };
 
     return //
-      vk_utils::check_vk_result(context_.createInstance(create_info),
-        "Failed to create Vulkan instance, with result: {}")
+      vk_utils::locate(context_.createInstance(info))
         .transform(vk_utils::store_into(instance_));
   }
 
@@ -446,8 +567,7 @@ private:
   has_required_extensions(const vk::raii::PhysicalDevice& device) -> bool
   {
     const auto extensions_result =
-      vk_utils::check_vk_result(device.enumerateDeviceExtensionProperties(),
-        "Failed to enumerate device extensions: {}");
+      vk_utils::locate(device.enumerateDeviceExtensionProperties());
 
     if (!extensions_result) { return false; }
 
@@ -461,6 +581,7 @@ private:
       });
   }
 
+  // TODO(Konrad): fix this monstrosity
   constexpr auto
   get_queue_family_indices()
     -> std::pair<std::optional<std::uint32_t>, std::optional<std::uint32_t>>
@@ -475,18 +596,22 @@ private:
       const bool supports_graphics =
         (qfp.queueFlags & vk::QueueFlagBits::eGraphics) != vk::QueueFlags { 0 };
 
-      const auto [ result, supports_presentation ] =
-        physical_device_.getSurfaceSupportKHR(
-          static_cast<std::uint32_t>(index), *surface_);
+      const auto surface_support_result = physical_device_.getSurfaceSupportKHR(
+        static_cast<std::uint32_t>(index), *surface_);
+
+      if (!surface_support_result.has_value())
+      {
+        return { std::nullopt, std::nullopt };
+      }
 
       if (supports_graphics && !graphics_index) { graphics_index = index; }
 
-      if ((supports_presentation != vk::Bool32 { 0 }) && !presentation_index)
+      if ((*surface_support_result != vk::Bool32 { 0 }) && !presentation_index)
       {
         presentation_index = index;
       }
 
-      if (supports_graphics && (supports_presentation != vk::Bool32 { 0 }))
+      if (supports_graphics && (*surface_support_result != vk::Bool32 { 0 }))
       {
         graphics_index = presentation_index = index;
         break;
@@ -565,41 +690,37 @@ private:
 
   constexpr auto
   get_surface_capabilities(vk::SurfaceCapabilitiesKHR& surface_capabilities)
-    -> std::expected<void, std::string>
+    -> std::expected<void, vk_utils::error>
   {
-    return vk_utils::check_vk_result(
-      physical_device_.getSurfaceCapabilitiesKHR(*surface_),
-      "Failed to acquire surface capabilities")
+    return vk_utils::locate(
+      physical_device_.getSurfaceCapabilitiesKHR(*surface_))
       .transform(vk_utils::store_into(surface_capabilities));
   }
 
   constexpr auto
   get_surface_formats(std::vector<vk::SurfaceFormatKHR>& surface_formats)
-    -> std::expected<void, std::string>
+    -> std::expected<void, vk_utils::error>
   {
-    return vk_utils::check_vk_result(
-      physical_device_.getSurfaceFormatsKHR(*surface_),
-      "Failed to acquire surface formats")
+    return vk_utils::locate(physical_device_.getSurfaceFormatsKHR(*surface_))
       .transform(vk_utils::store_into(surface_formats));
   }
 
   constexpr auto
   get_surface_present_modes(
     std::vector<vk::PresentModeKHR>& surface_presentation_modes)
-    -> std::expected<void, std::string>
+    -> std::expected<void, vk_utils::error>
   {
-    return vk_utils::check_vk_result(
-      physical_device_.getSurfacePresentModesKHR(*surface_),
-      "Failed to acquire surface presentation modes")
+    return vk_utils::locate(
+      physical_device_.getSurfacePresentModesKHR(*surface_))
       .transform(vk_utils::store_into(surface_presentation_modes));
   }
 
   constexpr auto
   create_swap_chain(const vk::SurfaceCapabilitiesKHR& surface_capabilities,
     std::span<const vk::PresentModeKHR> surface_presentation_modes)
-    -> std::expected<void, std::string>
+    -> std::expected<void, vk_utils::error>
   {
-    const vk::SwapchainCreateInfoKHR swap_chain_create_info {
+    const vk::SwapchainCreateInfoKHR swap_chain_info {
       .flags = vk::SwapchainCreateFlagsKHR(),
       .surface = *surface_,
       .minImageCount = choose_swap_min_image_count(surface_capabilities),
@@ -616,28 +737,37 @@ private:
       .oldSwapchain = nullptr,
     };
 
-    return create_swap_chain_impl(swap_chain_create_info)
-      .and_then([ this ]() -> std::expected<void, std::string>
+    return create_swap_chain_impl(swap_chain_info)
+      .and_then([ this ]() -> std::expected<void, vk_utils::error>
         { return get_swap_chain_images(); });
   }
 
   constexpr auto
-  create_swap_chain_impl(
-    const vk::SwapchainCreateInfoKHR& swap_chain_create_info)
-    -> std::expected<void, std::string>
+  create_swap_chain_impl(const vk::SwapchainCreateInfoKHR& swap_chain_info)
+    -> std::expected<void, vk_utils::error>
   {
-    return vk_utils::check_vk_result(
-      device_.createSwapchainKHR(swap_chain_create_info),
-      "Failed to create swap chain")
+    return vk_utils::locate(device_.createSwapchainKHR(swap_chain_info))
       .transform(vk_utils::store_into(swap_chain_));
   }
 
   constexpr auto
-  get_swap_chain_images() -> std::expected<void, std::string>
+  get_swap_chain_images() -> std::expected<void, vk_utils::error>
   {
-    return vk_utils::check_vk_result(
-      swap_chain_.getImages(), "Failed to get swap chain images")
+    return vk_utils::locate(swap_chain_.getImages())
       .transform(vk_utils::store_into(swap_chain_images_));
+  }
+
+  [[nodiscard]]
+  constexpr auto
+  create_shader_module(std::span<const char> code)
+    -> std::expected<vk::raii::ShaderModule, vk_utils::error>
+  {
+    vk::ShaderModuleCreateInfo info {
+      .codeSize = code.size() * sizeof(char),
+      .pCode = reinterpret_cast<const std::uint32_t*>(code.data()),
+    };
+
+    return vk_utils::locate(device_.createShaderModule(info));
   }
 
 private:
@@ -654,6 +784,8 @@ private:
   vk::raii::SwapchainKHR swap_chain_ { nullptr };
   std::vector<vk::Image> swap_chain_images_;
   std::vector<vk::raii::ImageView> swap_chain_image_views_;
+  vk::raii::PipelineLayout pipeline_layout_ { nullptr };
+  vk::raii::Pipeline graphics_pipeline_ { nullptr };
 
   // 4 bytes alignment
   vk::SurfaceFormatKHR swap_chain_surface_format_ {};

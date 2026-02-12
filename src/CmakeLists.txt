@@ -1,9 +1,17 @@
 add_library(app INTERFACE)
 
-target_sources(app INTERFACE
-  FILE_SET headers TYPE HEADERS
-  BASE_DIRS "${CMAKE_SOURCE_DIR}/src"
-  FILES
-    app.hpp
-    vk_utils.hpp
+target_sources(app 
+  INTERFACE
+    FILE_SET headers TYPE HEADERS
+    BASE_DIRS "${CMAKE_SOURCE_DIR}/src"
+    FILES
+      app.hpp
+      vk_utils.hpp
 )
+
+target_link_libraries(app
+  INTERFACE
+    Vulkan::Vulkan
+)
+
+target_compile_features(app INTERFACE cxx_std_26)

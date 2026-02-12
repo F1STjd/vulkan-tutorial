@@ -1,32 +1,61 @@
 #pragma once
 
 #include <algorithm>
-#include <cstring>
 #include <expected>
-#include <format>
-#include <string>
+#include <source_location>
 
+#include <variant>
 #include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_to_string.hpp>
+
+#include "apdevpkey.h"
+#include "app_utils.hpp"
 
 namespace vk_utils
 {
 
-template<typename ResultValueType>
-constexpr auto
-check_vk_result(ResultValueType result_value, std::string_view message)
-  -> std::expected<std::remove_reference_t<decltype(result_value.value)>,
-    std::string>
+struct error
 {
-  using ValueType = std::remove_reference_t<decltype(result_value.value)>;
-  if (result_value.result != vk::Result::eSuccess) [[unlikely]]
+  std::variant<vk::Result, app_utils::error> reason;
+  std::source_location location;
+
+  template<class... Ts>
+  struct overloaded : Ts...
   {
-    auto result_str = vk::to_string(result_value.result);
-    return std::expected<ValueType, std::string> {
-      std::unexpect,
-      std::vformat(message, std::make_format_args(result_str)),
-    };
+    using Ts::operator()...;
+  };
+
+  [[nodiscard]] constexpr auto
+  to_string() const -> std::string
+  {
+    return std::visit(
+      overloaded {
+        [](vk::Result r) -> std::string { return vk::to_string(r); },
+        [](app_utils::error e) -> std::string
+        { return std::string { app_utils::to_string(e) }; },
+      },
+      reason);
   }
-  return std::move(result_value.value);
+};
+
+template<typename T>
+constexpr auto
+locate(std::expected<T, vk::Result> result,
+  std::source_location loc = std::source_location::current())
+  -> std::expected<T, error>
+{
+  if (result) { return std::move(*result); }
+  return std::unexpected { error { result.error(), loc } };
+}
+
+template<typename T>
+constexpr auto
+locate(std::expected<T, app_utils::error> result,
+  std::source_location loc = std::source_location::current())
+  -> std::expected<T, error>
+{
+  if (result) { return std::move(*result); }
+  return std::unexpected { error { result.error(), loc } };
 }
 
 template<typename T>
@@ -39,8 +68,8 @@ store_into(T& out)
 
 template<typename Properties, typename Projection>
 auto constexpr validate_required(std::vector<const char*> required,
-  const Properties& available, Projection proj, std::string_view error_prefix)
-  -> std::expected<std::vector<const char*>, std::string>
+  const Properties& available, Projection proj)
+  -> std::expected<std::vector<const char*>, vk::Result>
 {
   for (const auto* required_item : required)
   {
@@ -49,9 +78,7 @@ auto constexpr validate_required(std::vector<const char*> required,
           { return std::strcmp(proj(property), required_item) == 0; }))
       [[unlikely]]
     {
-      return std::expected<std::vector<const char*>, std::string> {
-        std::unexpect, std::format("{}: {}", error_prefix, required_item)
-      };
+      return std::unexpected { vk::Result::eErrorUnknown };
     }
   }
   return required;

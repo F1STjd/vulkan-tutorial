@@ -1,0 +1,1 @@
+slangc.exe shader.slang -target spirv -profile spirv_1_4 -emit-spirv-directly -fvk-use-entrypoint-name -entry vertex_main -entry fragment_main -o slang.spv
