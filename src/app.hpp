@@ -98,7 +98,9 @@ private:
       .and_then([ this ] -> std::expected<void, vk_utils::error>
         { return create_image_views(); })
       .and_then([ this ] -> std::expected<void, vk_utils::error>
-        { return create_graphics_pipeline(); });
+        { return create_graphics_pipeline(); })
+      .and_then([ this ] -> std::expected<void, vk_utils::error>
+        { return create_command_pool(); });
   }
 
   constexpr void
@@ -431,6 +433,17 @@ private:
             device_.createGraphicsPipeline(nullptr, pipeline_info_chain.get()))
             .transform(vk_utils::store_into(graphics_pipeline_));
         });
+  }
+
+  constexpr auto
+  create_command_pool() -> std::expected<void, vk_utils::error>
+  {
+    vk::CommandPoolCreateInfo command_pool_info {
+      .flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+      .queueFamilyIndex = graphics_queue_index_,
+    };
+    return vk_utils::locate(device_.createCommandPool(command_pool_info))
+      .transform(vk_utils::store_into(command_pool_));
   }
 
   // TODO(Konrad): Refactor - maybe the vk_utils::validate_required is bad
@@ -785,8 +798,10 @@ private:
   std::vector<vk::raii::ImageView> swap_chain_image_views_;
   vk::raii::PipelineLayout pipeline_layout_ { nullptr };
   vk::raii::Pipeline graphics_pipeline_ { nullptr };
+  vk::raii::CommandPool command_pool_ { nullptr };
 
   // 4 bytes alignment
   vk::SurfaceFormatKHR swap_chain_surface_format_ {};
   vk::Extent2D swap_chain_extent_ {};
+  std::uint32_t graphics_queue_index_ { ~0U };
 };
