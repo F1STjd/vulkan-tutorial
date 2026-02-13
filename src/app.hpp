@@ -625,7 +625,7 @@ private:
     const vk::DebugUtilsMessengerCallbackDataEXT* p_callback_data,
     [[maybe_unused]] void* _) -> vk::Bool32
   {
-    std::println(std::cerr, "validation layer: type {} msg: {}",
+    std::println(std::cerr, "validation layer: type {}\nmsg: {}",
       vk::to_string(type), p_callback_data->pMessage);
 
     return vk::False;
