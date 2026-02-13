@@ -831,36 +831,71 @@ private:
     };
 
     return create_swap_chain_impl(swap_chain_info)
-      .and_then([ this ]() -> std::expected<void, vk_utils::error>
+      .and_then([ this ]() -> std::expected<void, vkutils::error>
         { return get_swap_chain_images(); });
   }
 
   constexpr auto
   create_swap_chain_impl(const vk::SwapchainCreateInfoKHR& swap_chain_info)
-    -> std::expected<void, vk_utils::error>
+    -> std::expected<void, vkutils::error>
   {
-    return vk_utils::locate(device_.createSwapchainKHR(swap_chain_info))
-      .transform(vk_utils::store_into(swap_chain_));
+    return vkutils::locate(device_.createSwapchainKHR(swap_chain_info))
+      .transform(vkutils::store_into(swap_chain_));
   }
 
   constexpr auto
-  get_swap_chain_images() -> std::expected<void, vk_utils::error>
+  get_swap_chain_images() -> std::expected<void, vkutils::error>
   {
-    return vk_utils::locate(swap_chain_.getImages())
-      .transform(vk_utils::store_into(swap_chain_images_));
+    return vkutils::locate(swap_chain_.getImages())
+      .transform(vkutils::store_into(swap_chain_images_));
   }
 
   [[nodiscard]]
   constexpr auto
   create_shader_module(std::span<const char> code)
-    -> std::expected<vk::raii::ShaderModule, vk_utils::error>
+    -> std::expected<vk::raii::ShaderModule, vkutils::error>
   {
     vk::ShaderModuleCreateInfo info {
       .codeSize = code.size() * sizeof(char),
       .pCode = reinterpret_cast<const std::uint32_t*>(code.data()),
     };
 
-    return vk_utils::locate(device_.createShaderModule(info));
+    return vkutils::locate(device_.createShaderModule(info));
+  }
+
+  void
+  transition_image_layout(std::uint32_t image_index, vk::ImageLayout old_layout,
+    vk::ImageLayout new_layout, vk::AccessFlags2 src_access_mask,
+    vk::AccessFlags2 dst_access_mask,
+    vk::PipelineStageFlags2 src_pipeline_stage_mask,
+    vk::PipelineStageFlags2 dst_pipeline_stage_mask)
+  {
+    vk::ImageMemoryBarrier2 barrier {
+      .srcStageMask = src_pipeline_stage_mask,
+      .srcAccessMask = src_access_mask,
+      .dstStageMask = dst_pipeline_stage_mask,
+      .dstAccessMask = dst_access_mask,
+      .oldLayout = old_layout,
+      .newLayout = new_layout,
+      .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+      .image = swap_chain_images_[ image_index ],
+      .subresourceRange {
+        .aspectMask = vk::ImageAspectFlagBits::eColor,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+      },
+    };
+
+    vk::DependencyInfo dependency_info {
+      .dependencyFlags = {},
+      .imageMemoryBarrierCount = 1,
+      .pImageMemoryBarriers = &barrier,
+    };
+
+    command_buffer_.pipelineBarrier2(dependency_info);
   }
 
 private:
@@ -880,6 +915,7 @@ private:
   vk::raii::PipelineLayout pipeline_layout_ { nullptr };
   vk::raii::Pipeline graphics_pipeline_ { nullptr };
   vk::raii::CommandPool command_pool_ { nullptr };
+  vk::raii::CommandBuffer command_buffer_ { nullptr };
 
   // 4 bytes alignment
   vk::SurfaceFormatKHR swap_chain_surface_format_ {};
