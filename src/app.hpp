@@ -460,7 +460,7 @@ private:
 
     return vkutils::locate(
       device_.allocateCommandBuffers(command_buffer_allocate_info))
-      .transform([ this ](auto&& command_buffers) -> auto
+      .transform([ this ](auto&& command_buffers) noexcept -> auto
         { command_buffer_ = std::move(command_buffers.front()); });
   }
 
