@@ -1,6 +1,5 @@
 #pragma once
 
-#include "app_utils.hpp"
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
@@ -18,14 +17,13 @@
 #define VULKAN_HPP_NO_EXCEPTIONS
 #define VULKAN_HPP_USE_STD_EXPECTED
 #include "vulkan/vulkan.hpp"
-#include <vulkan/vk_platform.h>
-#include <vulkan/vulkan_core.h>
 #include <vulkan/vulkan_raii.hpp>
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
 #include "../lib/load/load.hpp"
+#include "app_utils.hpp"
 #include "vk_utils.hpp"
 
 static constexpr std::uint32_t initial_width { 800 };
@@ -87,13 +85,20 @@ private:
   init_vulkan() -> std::expected<void, vk_utils::error>
   {
     return create_instance()
-      .and_then([ this ] { return setup_debug_messenger(); })
-      .and_then([ this ] { return create_surface(); })
-      .and_then([ this ] { return pick_physical_device(); })
-      .and_then([ this ] { return create_logical_device(); })
-      .and_then([ this ] { return create_swap_chain(); })
-      .and_then([ this ] { return create_image_views(); })
-      .and_then([ this ] { return create_graphics_pipeline(); });
+      .and_then([ this ] -> std::expected<void, vk_utils::error>
+        { return setup_debug_messenger(); })
+      .and_then([ this ] -> std::expected<void, vk_utils::error>
+        { return create_surface(); })
+      .and_then([ this ] -> std::expected<void, vk_utils::error>
+        { return pick_physical_device(); })
+      .and_then([ this ] -> std::expected<void, vk_utils::error>
+        { return create_logical_device(); })
+      .and_then([ this ] -> std::expected<void, vk_utils::error>
+        { return create_swap_chain(); })
+      .and_then([ this ] -> std::expected<void, vk_utils::error>
+        { return create_image_views(); })
+      .and_then([ this ] -> std::expected<void, vk_utils::error>
+        { return create_graphics_pipeline(); });
   }
 
   constexpr void
@@ -172,24 +177,23 @@ private:
   constexpr auto
   pick_physical_device() -> std::expected<void, vk_utils::error>
   {
-    return //
-      vk_utils::locate(instance_.enumeratePhysicalDevices())
-        .and_then(
-          [ this ](const auto& devices) -> std::expected<void, vk_utils::error>
+    return vk_utils::locate(instance_.enumeratePhysicalDevices())
+      .and_then(
+        [ this ](const auto& devices) -> std::expected<void, vk_utils::error>
+        {
+          for (const auto& device : devices)
           {
-            for (const auto& device : devices)
+            if (is_device_suitable(device))
             {
-              if (is_device_suitable(device))
-              {
-                physical_device_ = device;
-                return {};
-              }
+              physical_device_ = device;
+              return {};
             }
-            return std::expected<void, vk_utils::error> {
-              std::unexpect,
-              app_utils::error::no_suitable_gpu,
-            };
-          });
+          }
+          return std::expected<void, vk_utils::error> {
+            std::unexpect,
+            app_utils::error::no_suitable_gpu,
+          };
+        });
   }
 
   constexpr auto
@@ -311,17 +315,14 @@ private:
   constexpr auto
   create_graphics_pipeline() -> std::expected<void, vk_utils::error>
   {
-    auto shader_module_result = //
+    auto shader_module_result =
       vk_utils::locate(load::shader({ SHADER_DIR "/slang.spv" }))
         .and_then([ this ](std::span<const char> code) -> auto
           { return create_shader_module(code); });
 
     if (!shader_module_result.has_value()) [[unlikely]]
     {
-      return std::expected<void, vk_utils::error> {
-        std::unexpect,
-        shader_module_result.error(),
-      };
+      return std::unexpected { shader_module_result.error() };
     }
 
     const auto& shader_module = *shader_module_result;
@@ -342,7 +343,7 @@ private:
     };
 
     vk::PipelineVertexInputStateCreateInfo vertex_input_info;
-    vk::PipelineInputAssemblyStateCreateInfo input_assembly {
+    vk::PipelineInputAssemblyStateCreateInfo input_assembly_info {
       .topology = vk::PrimitiveTopology::eTriangleList
     };
 
@@ -405,28 +406,29 @@ private:
       .and_then(
         [ &, this ]() noexcept -> std::expected<void, vk_utils::error>
         {
-          vk::PipelineRenderingCreateInfo pipeline_rendering_info {
-            .colorAttachmentCount = 1,
-            .pColorAttachmentFormats = &swap_chain_surface_format_.format,
-          };
-
-          vk::GraphicsPipelineCreateInfo pipeline_info {
-            .pNext = &pipeline_rendering_info,
-            .stageCount = static_cast<std::uint32_t>(shader_stages_info.size()),
-            .pStages = shader_stages_info.data(),
-            .pVertexInputState = &vertex_input_info,
-            .pInputAssemblyState = &input_assembly,
-            .pViewportState = &viewport_state_info,
-            .pRasterizationState = &rasterizer_info,
-            .pMultisampleState = &multisampling_info,
-            .pColorBlendState = &color_blending_info,
-            .pDynamicState = &dynamic_state_info,
-            .layout = *pipeline_layout_,
-            .subpass = 0,
+          vk::StructureChain pipeline_info_chain {
+            vk::GraphicsPipelineCreateInfo {
+              .stageCount =
+                static_cast<std::uint32_t>(shader_stages_info.size()),
+              .pStages = shader_stages_info.data(),
+              .pVertexInputState = &vertex_input_info,
+              .pInputAssemblyState = &input_assembly_info,
+              .pViewportState = &viewport_state_info,
+              .pRasterizationState = &rasterizer_info,
+              .pMultisampleState = &multisampling_info,
+              .pColorBlendState = &color_blending_info,
+              .pDynamicState = &dynamic_state_info,
+              .layout = *pipeline_layout_,
+              .renderPass = nullptr,
+            },
+            vk::PipelineRenderingCreateInfo {
+              .colorAttachmentCount = 1,
+              .pColorAttachmentFormats = &swap_chain_surface_format_.format,
+            },
           };
 
           return vk_utils::locate(
-            device_.createGraphicsPipeline(nullptr, pipeline_info))
+            device_.createGraphicsPipeline(nullptr, pipeline_info_chain.get()))
             .transform(vk_utils::store_into(graphics_pipeline_));
         });
   }
@@ -442,17 +444,16 @@ private:
       required_layers.assign_range(validation_layers);
     }
 
-    return //
-      vk_utils::locate(context_.enumerateInstanceLayerProperties())
-        .and_then(
-          [ &required_layers ](const auto& layer_properties) -> auto
-          {
-            return vk_utils::locate(
-              vk_utils::validate_required(std::move(required_layers),
-                layer_properties, [](const auto& prop) noexcept -> auto
-                { return prop.layerName.data(); }));
-          })
-        .transform(vk_utils::store_into(required_layers));
+    return vk_utils::locate(context_.enumerateInstanceLayerProperties())
+      .and_then(
+        [ &required_layers ](const auto& layer_properties) -> auto
+        {
+          return vk_utils::locate(
+            vk_utils::validate_required(std::move(required_layers),
+              layer_properties, [](const auto& prop) noexcept -> auto
+              { return prop.layerName.data(); }));
+        })
+      .transform(vk_utils::store_into(required_layers));
   }
 
   // TODO(Konrad): Refactor - maybe the vk_utils::validate_required is bad
@@ -477,17 +478,16 @@ private:
       required_extensions.push_back(vk::EXTDebugUtilsExtensionName);
     }
 
-    return //
-      vk_utils::locate(context_.enumerateInstanceExtensionProperties())
-        .and_then(
-          [ &required_extensions ](const auto& extension_properties) -> auto
-          {
-            return vk_utils::locate(
-              vk_utils::validate_required(std::move(required_extensions),
-                extension_properties, [](const auto& prop) noexcept -> auto
-                { return prop.extensionName.data(); }));
-          })
-        .transform(vk_utils::store_into(required_extensions));
+    return vk_utils::locate(context_.enumerateInstanceExtensionProperties())
+      .and_then(
+        [ &required_extensions ](const auto& extension_properties) -> auto
+        {
+          return vk_utils::locate(
+            vk_utils::validate_required(std::move(required_extensions),
+              extension_properties, [](const auto& prop) noexcept -> auto
+              { return prop.extensionName.data(); }));
+        })
+      .transform(vk_utils::store_into(required_extensions));
   }
 
   constexpr auto
@@ -511,9 +511,8 @@ private:
       .ppEnabledExtensionNames = extensions.data(),
     };
 
-    return //
-      vk_utils::locate(context_.createInstance(info))
-        .transform(vk_utils::store_into(instance_));
+    return vk_utils::locate(context_.createInstance(info))
+      .transform(vk_utils::store_into(instance_));
   }
 
   constexpr void

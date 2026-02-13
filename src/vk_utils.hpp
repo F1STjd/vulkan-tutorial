@@ -6,7 +6,6 @@
 
 #include <variant>
 #include <vulkan/vulkan.hpp>
-#include <vulkan/vulkan_to_string.hpp>
 
 #include "apdevpkey.h"
 #include "app_utils.hpp"
