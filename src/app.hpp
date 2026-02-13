@@ -314,6 +314,7 @@ private:
     return {};
   }
 
+  // TODO(Konrad): refactor - too long
   constexpr auto
   create_graphics_pipeline() -> std::expected<void, vk_utils::error>
   {
