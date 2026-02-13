@@ -23,8 +23,8 @@
 #include <GLFW/glfw3.h>
 
 #include "../lib/load/load.hpp"
-#include "app_utils.hpp"
-#include "vk_utils.hpp"
+#include "apputils.hpp"
+#include "vkutils.hpp"
 
 static constexpr std::uint32_t initial_width { 800 };
 static constexpr std::uint32_t initial_height { 600 };
@@ -45,7 +45,7 @@ public:
   run()
   {
     auto init_result = //
-      init_window().and_then([ this ] -> std::expected<void, vk_utils::error>
+      init_window().and_then([ this ] -> std::expected<void, vkutils::error>
         { return init_vulkan(); });
 
     if (!init_result.has_value()) [[unlikely]]
@@ -69,7 +69,7 @@ public:
 private:
   // TODO(Konrad): change error type to some glfw related one
   constexpr auto
-  init_window() -> std::expected<void, vk_utils::error>
+  init_window() -> std::expected<void, vkutils::error>
   {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
@@ -82,25 +82,27 @@ private:
   }
 
   constexpr auto
-  init_vulkan() -> std::expected<void, vk_utils::error>
+  init_vulkan() -> std::expected<void, vkutils::error>
   {
     return create_instance()
-      .and_then([ this ] -> std::expected<void, vk_utils::error>
+      .and_then([ this ] -> std::expected<void, vkutils::error>
         { return setup_debug_messenger(); })
-      .and_then([ this ] -> std::expected<void, vk_utils::error>
+      .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_surface(); })
-      .and_then([ this ] -> std::expected<void, vk_utils::error>
+      .and_then([ this ] -> std::expected<void, vkutils::error>
         { return pick_physical_device(); })
-      .and_then([ this ] -> std::expected<void, vk_utils::error>
+      .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_logical_device(); })
-      .and_then([ this ] -> std::expected<void, vk_utils::error>
+      .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_swap_chain(); })
-      .and_then([ this ] -> std::expected<void, vk_utils::error>
+      .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_image_views(); })
-      .and_then([ this ] -> std::expected<void, vk_utils::error>
+      .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_graphics_pipeline(); })
-      .and_then([ this ] -> std::expected<void, vk_utils::error>
-        { return create_command_pool(); });
+      .and_then([ this ] -> std::expected<void, vkutils::error>
+        { return create_command_pool(); })
+      .and_then([ this ] -> std::expected<void, vkutils::error>
+        { return create_command_buffer(); });
   }
 
   constexpr void
@@ -120,20 +122,20 @@ private:
   }
 
   constexpr auto
-  create_instance() -> std::expected<void, vk_utils::error>
+  create_instance() -> std::expected<void, vkutils::error>
   {
     std::vector<const char*> layers;
     std::vector<const char*> extensions;
 
     return get_required_layers(layers)
-      .and_then([ &, this ]() -> std::expected<void, vk_utils::error>
+      .and_then([ &, this ]() -> std::expected<void, vkutils::error>
         { return get_required_extensions(extensions); })
-      .and_then([ &, this ]() -> std::expected<void, vk_utils::error>
+      .and_then([ &, this ]() -> std::expected<void, vkutils::error>
         { return create_vulkan_instance(layers, extensions); });
   }
 
   constexpr auto
-  setup_debug_messenger() -> std::expected<void, vk_utils::error>
+  setup_debug_messenger() -> std::expected<void, vkutils::error>
   {
     if (!enable_validation_layers) { return {}; }
 
@@ -154,21 +156,21 @@ private:
         .pfnUserCallback = &debug_callback,
       };
 
-    return vk_utils::locate(
+    return vkutils::locate(
       instance_.createDebugUtilsMessengerEXT(debug_utils_messenger_info_EXT))
-      .transform(vk_utils::store_into(debug_messenger_));
+      .transform(vkutils::store_into(debug_messenger_));
   }
 
   constexpr auto
-  create_surface() -> std::expected<void, vk_utils::error>
+  create_surface() -> std::expected<void, vkutils::error>
   {
     VkSurfaceKHR _surface {};
     if (glfwCreateWindowSurface(*instance_, window_, nullptr, &_surface) != 0)
       [[unlikely]]
     {
-      return std::expected<void, vk_utils::error> {
+      return std::expected<void, vkutils::error> {
         std::unexpect,
-        app_utils::error::glfw_surface_creation_failed,
+        apputils::error::glfw_surface_creation_failed,
       };
     }
 
@@ -177,11 +179,11 @@ private:
   }
 
   constexpr auto
-  pick_physical_device() -> std::expected<void, vk_utils::error>
+  pick_physical_device() -> std::expected<void, vkutils::error>
   {
-    return vk_utils::locate(instance_.enumeratePhysicalDevices())
+    return vkutils::locate(instance_.enumeratePhysicalDevices())
       .and_then(
-        [ this ](const auto& devices) -> std::expected<void, vk_utils::error>
+        [ this ](const auto& devices) -> std::expected<void, vkutils::error>
         {
           for (const auto& device : devices)
           {
@@ -191,24 +193,24 @@ private:
               return {};
             }
           }
-          return std::expected<void, vk_utils::error> {
+          return std::expected<void, vkutils::error> {
             std::unexpect,
-            app_utils::error::no_suitable_gpu,
+            apputils::error::no_suitable_gpu,
           };
         });
   }
 
   constexpr auto
-  create_logical_device() -> std::expected<void, vk_utils::error>
+  create_logical_device() -> std::expected<void, vkutils::error>
   {
     const auto [ graphics_index, presentation_index ] =
       get_queue_family_indices();
 
     if (!graphics_index || !presentation_index)
     {
-      return std::expected<void, vk_utils::error> {
+      return std::expected<void, vkutils::error> {
         std::unexpect,
-        app_utils::error::missing_queue_families,
+        apputils::error::missing_queue_families,
       };
     }
 
@@ -241,7 +243,7 @@ private:
       .ppEnabledExtensionNames = device_extensions.data(),
     };
 
-    return vk_utils::locate(physical_device_.createDevice(device_info))
+    return vkutils::locate(physical_device_.createDevice(device_info))
       .transform(
         [ this, graphics_index ](auto&& device) noexcept -> auto
         {
@@ -252,7 +254,7 @@ private:
   }
 
   constexpr auto
-  create_swap_chain() -> std::expected<void, vk_utils::error>
+  create_swap_chain() -> std::expected<void, vkutils::error>
   {
     vk::SurfaceCapabilitiesKHR surface_capabilities;
     std::vector<vk::SurfaceFormatKHR> surface_formats;
@@ -271,7 +273,7 @@ private:
             choose_swap_surface_format(surface_formats);
         })
       .and_then(
-        [ &, this ]() noexcept -> std::expected<void, vk_utils::error>
+        [ &, this ]() noexcept -> std::expected<void, vkutils::error>
         {
           return create_swap_chain(
             surface_capabilities, surface_presentation_modes);
@@ -279,7 +281,7 @@ private:
   }
 
   constexpr auto
-  create_image_views() -> std::expected<void, vk_utils::error>
+  create_image_views() -> std::expected<void, vkutils::error>
   {
     swap_chain_image_views_.clear();
 
@@ -303,7 +305,7 @@ private:
     {
       image_view_info.image = image;
       auto image_view =
-        vk_utils::locate(device_.createImageView(image_view_info));
+        vkutils::locate(device_.createImageView(image_view_info));
       if (!image_view.has_value()) [[unlikely]]
       {
         return std::unexpected { image_view.error() };
@@ -316,10 +318,10 @@ private:
 
   // TODO(Konrad): refactor - too long
   constexpr auto
-  create_graphics_pipeline() -> std::expected<void, vk_utils::error>
+  create_graphics_pipeline() -> std::expected<void, vkutils::error>
   {
     auto shader_module_result =
-      vk_utils::locate(load::shader({ SHADER_DIR "/slang.spv" }))
+      vkutils::locate(load::shader({ SHADER_DIR "/slang.spv" }))
         .and_then([ this ](std::span<const char> code) -> auto
           { return create_shader_module(code); });
 
@@ -404,10 +406,10 @@ private:
       .pushConstantRangeCount = 0,
     };
 
-    return vk_utils::locate(device_.createPipelineLayout(pipeline_layout_info))
-      .transform(vk_utils::store_into(pipeline_layout_))
+    return vkutils::locate(device_.createPipelineLayout(pipeline_layout_info))
+      .transform(vkutils::store_into(pipeline_layout_))
       .and_then(
-        [ &, this ]() noexcept -> std::expected<void, vk_utils::error>
+        [ &, this ]() noexcept -> std::expected<void, vkutils::error>
         {
           vk::StructureChain pipeline_info_chain {
             vk::GraphicsPipelineCreateInfo {
@@ -430,51 +432,129 @@ private:
             },
           };
 
-          return vk_utils::locate(
+          return vkutils::locate(
             device_.createGraphicsPipeline(nullptr, pipeline_info_chain.get()))
-            .transform(vk_utils::store_into(graphics_pipeline_));
+            .transform(vkutils::store_into(graphics_pipeline_));
         });
   }
 
   constexpr auto
-  create_command_pool() -> std::expected<void, vk_utils::error>
+  create_command_pool() -> std::expected<void, vkutils::error>
   {
     vk::CommandPoolCreateInfo command_pool_info {
       .flags = vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
       .queueFamilyIndex = graphics_queue_index_,
     };
-    return vk_utils::locate(device_.createCommandPool(command_pool_info))
-      .transform(vk_utils::store_into(command_pool_));
+    return vkutils::locate(device_.createCommandPool(command_pool_info))
+      .transform(vkutils::store_into(command_pool_));
   }
 
-  // TODO(Konrad): Refactor - maybe the vk_utils::validate_required is bad
+  constexpr auto
+  create_command_buffer() -> std::expected<void, vkutils::error>
+  {
+    vk::CommandBufferAllocateInfo command_buffer_allocate_info {
+      .commandPool = command_pool_,
+      .level = vk::CommandBufferLevel::ePrimary,
+      .commandBufferCount = 1,
+    };
+
+    return vkutils::locate(
+      device_.allocateCommandBuffers(command_buffer_allocate_info))
+      .transform([ this ](auto&& command_buffers) -> auto
+        { command_buffer_ = std::move(command_buffers.front()); });
+  }
+
+  constexpr auto
+  record_command_buffer(std::uint32_t image_index)
+    -> std::expected<void, vkutils::error>
+  {
+    if (const auto result = command_buffer_.begin({}); !result.has_value())
+    {
+      return vkutils::locate(result);
+    }
+
+    transition_image_layout(image_index, vk::ImageLayout::eUndefined,
+      vk::ImageLayout::eColorAttachmentOptimal, vk::AccessFlagBits2 {},
+      vk::AccessFlagBits2::eColorAttachmentWrite,
+      vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+      vk::PipelineStageFlagBits2::eColorAttachmentOutput);
+
+    vk::ClearValue clear_color = vk::ClearColorValue { 0.0F, 0.0F, 0.0F, 1.0F };
+    vk::RenderingAttachmentInfo attachment_info {
+      .imageView = swap_chain_image_views_[ image_index ],
+      .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+      .loadOp = vk::AttachmentLoadOp::eClear,
+      .storeOp = vk::AttachmentStoreOp::eStore,
+      .clearValue = clear_color,
+    };
+    vk::RenderingInfo rendering_info {
+      .renderArea {
+        .offset { .x = 0, .y = 0 },
+        .extent = swap_chain_extent_,
+      },
+      .layerCount = 1,
+      .colorAttachmentCount = 1,
+      .pColorAttachments = &attachment_info,
+    };
+
+    command_buffer_.beginRendering(rendering_info);
+    command_buffer_.bindPipeline(
+      vk::PipelineBindPoint::eGraphics, graphics_pipeline_);
+    command_buffer_.setViewport(0,
+      vk::Viewport {
+        .x = 0.0F,
+        .y = 0.0F,
+        .width = static_cast<float>(swap_chain_extent_.width),
+        .height = static_cast<float>(swap_chain_extent_.height),
+        .minDepth = 0.0F,
+        .maxDepth = 1.0F,
+      });
+    command_buffer_.setScissor(0,
+      vk::Rect2D {
+        .offset { .x = 0, .y = 0 },
+        .extent = swap_chain_extent_,
+      });
+    command_buffer_.draw(3, 1, 0, 0);
+    command_buffer_.endRendering();
+
+    transition_image_layout(image_index,
+      vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR,
+      vk::AccessFlagBits2::eColorAttachmentWrite, vk::AccessFlagBits2 {},
+      vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+      vk::PipelineStageFlagBits2::eBottomOfPipe);
+
+    return vkutils::locate(command_buffer_.end());
+  }
+
+private:
+  // TODO(Konrad): Refactor - maybe the vkutils::validate_required is bad
   // design
   constexpr auto
   get_required_layers(std::vector<const char*>& required_layers)
-    -> std::expected<void, vk_utils::error>
+    -> std::expected<void, vkutils::error>
   {
     if constexpr (enable_validation_layers)
     {
       required_layers.assign_range(validation_layers);
     }
 
-    return vk_utils::locate(context_.enumerateInstanceLayerProperties())
+    return vkutils::locate(context_.enumerateInstanceLayerProperties())
       .and_then(
         [ &required_layers ](const auto& layer_properties) -> auto
         {
-          return vk_utils::locate(
-            vk_utils::validate_required(std::move(required_layers),
+          return vkutils::locate(
+            vkutils::validate_required(std::move(required_layers),
               layer_properties, [](const auto& prop) noexcept -> auto
               { return prop.layerName.data(); }));
         })
-      .transform(vk_utils::store_into(required_layers));
+      .transform(vkutils::store_into(required_layers));
   }
 
-  // TODO(Konrad): Refactor - maybe the vk_utils::validate_required is bad
+  // TODO(Konrad): Refactor - maybe the vkutils::validate_required is bad
   // design
   constexpr auto
   get_required_extensions(std::vector<const char*>& required_extensions)
-    -> std::expected<void, vk_utils::error>
+    -> std::expected<void, vkutils::error>
   {
     std::uint32_t glfw_extension_count {};
     const auto* glfw_extensions =
@@ -492,22 +572,22 @@ private:
       required_extensions.push_back(vk::EXTDebugUtilsExtensionName);
     }
 
-    return vk_utils::locate(context_.enumerateInstanceExtensionProperties())
+    return vkutils::locate(context_.enumerateInstanceExtensionProperties())
       .and_then(
         [ &required_extensions ](const auto& extension_properties) -> auto
         {
-          return vk_utils::locate(
-            vk_utils::validate_required(std::move(required_extensions),
+          return vkutils::locate(
+            vkutils::validate_required(std::move(required_extensions),
               extension_properties, [](const auto& prop) noexcept -> auto
               { return prop.extensionName.data(); }));
         })
-      .transform(vk_utils::store_into(required_extensions));
+      .transform(vkutils::store_into(required_extensions));
   }
 
   constexpr auto
   create_vulkan_instance(std::span<const char* const> layers,
     std::span<const char* const> extensions)
-    -> std::expected<void, vk_utils::error>
+    -> std::expected<void, vkutils::error>
   {
     constexpr vk::ApplicationInfo app_info {
       .pApplicationName = "Hello Triangle",
@@ -525,8 +605,8 @@ private:
       .ppEnabledExtensionNames = extensions.data(),
     };
 
-    return vk_utils::locate(context_.createInstance(info))
-      .transform(vk_utils::store_into(instance_));
+    return vkutils::locate(context_.createInstance(info))
+      .transform(vkutils::store_into(instance_));
   }
 
   constexpr void
@@ -580,7 +660,7 @@ private:
   has_required_extensions(const vk::raii::PhysicalDevice& device) -> bool
   {
     const auto extensions_result =
-      vk_utils::locate(device.enumerateDeviceExtensionProperties());
+      vkutils::locate(device.enumerateDeviceExtensionProperties());
 
     if (!extensions_result) { return false; }
 
@@ -703,35 +783,35 @@ private:
 
   constexpr auto
   get_surface_capabilities(vk::SurfaceCapabilitiesKHR& surface_capabilities)
-    -> std::expected<void, vk_utils::error>
+    -> std::expected<void, vkutils::error>
   {
-    return vk_utils::locate(
+    return vkutils::locate(
       physical_device_.getSurfaceCapabilitiesKHR(*surface_))
-      .transform(vk_utils::store_into(surface_capabilities));
+      .transform(vkutils::store_into(surface_capabilities));
   }
 
   constexpr auto
   get_surface_formats(std::vector<vk::SurfaceFormatKHR>& surface_formats)
-    -> std::expected<void, vk_utils::error>
+    -> std::expected<void, vkutils::error>
   {
-    return vk_utils::locate(physical_device_.getSurfaceFormatsKHR(*surface_))
-      .transform(vk_utils::store_into(surface_formats));
+    return vkutils::locate(physical_device_.getSurfaceFormatsKHR(*surface_))
+      .transform(vkutils::store_into(surface_formats));
   }
 
   constexpr auto
   get_surface_present_modes(
     std::vector<vk::PresentModeKHR>& surface_presentation_modes)
-    -> std::expected<void, vk_utils::error>
+    -> std::expected<void, vkutils::error>
   {
-    return vk_utils::locate(
+    return vkutils::locate(
       physical_device_.getSurfacePresentModesKHR(*surface_))
-      .transform(vk_utils::store_into(surface_presentation_modes));
+      .transform(vkutils::store_into(surface_presentation_modes));
   }
 
   constexpr auto
   create_swap_chain(const vk::SurfaceCapabilitiesKHR& surface_capabilities,
     std::span<const vk::PresentModeKHR> surface_presentation_modes)
-    -> std::expected<void, vk_utils::error>
+    -> std::expected<void, vkutils::error>
   {
     const vk::SwapchainCreateInfoKHR swap_chain_info {
       .flags = vk::SwapchainCreateFlagsKHR(),

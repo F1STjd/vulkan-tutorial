@@ -8,14 +8,14 @@
 #include <vulkan/vulkan.hpp>
 
 #include "apdevpkey.h"
-#include "app_utils.hpp"
+#include "apputils.hpp"
 
-namespace vk_utils
+namespace vkutils
 {
 
 struct error
 {
-  std::variant<vk::Result, app_utils::error> reason;
+  std::variant<vk::Result, apputils::error> reason;
   std::source_location location;
 
   template<class... Ts>
@@ -30,8 +30,8 @@ struct error
     return std::visit(
       overloaded {
         [](vk::Result r) -> std::string { return vk::to_string(r); },
-        [](app_utils::error e) -> std::string
-        { return std::string { app_utils::to_string(e) }; },
+        [](apputils::error e) -> std::string
+        { return std::string { apputils::to_string(e) }; },
       },
       reason);
   }
@@ -43,17 +43,31 @@ locate(std::expected<T, vk::Result> result,
   std::source_location loc = std::source_location::current())
   -> std::expected<T, error>
 {
-  if (result) { return std::move(*result); }
+  if (result)
+  {
+    if constexpr (std::is_void_v<T>) { return {}; }
+    else
+    {
+      return std::move(*result);
+    }
+  }
   return std::unexpected { error { result.error(), loc } };
 }
 
 template<typename T>
 constexpr auto
-locate(std::expected<T, app_utils::error> result,
+locate(std::expected<T, apputils::error> result,
   std::source_location loc = std::source_location::current())
   -> std::expected<T, error>
 {
-  if (result) { return std::move(*result); }
+  if (result)
+  {
+    if constexpr (std::is_void_v<T>) { return {}; }
+    else
+    {
+      return std::move(*result);
+    }
+  }
   return std::unexpected { error { result.error(), loc } };
 }
 
@@ -82,4 +96,4 @@ auto constexpr validate_required(std::vector<const char*> required,
   }
   return required;
 }
-} // namespace vk_utils
+} // namespace vkutils

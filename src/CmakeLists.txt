@@ -6,7 +6,8 @@ target_sources(app
     BASE_DIRS "${CMAKE_SOURCE_DIR}/src"
     FILES
       app.hpp
-      vk_utils.hpp
+      vkutils.hpp
+      apputils.hpp
 )
 
 target_link_libraries(app

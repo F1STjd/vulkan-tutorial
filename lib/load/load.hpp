@@ -8,13 +8,13 @@
 
 #include <vulkan/vulkan.hpp>
 
-#include "app_utils.hpp"
+#include "apputils.hpp"
 
 namespace load
 {
 constexpr auto
 shader(const std::filesystem::path& path)
-  -> std::expected<std::vector<char>, app_utils::error>
+  -> std::expected<std::vector<char>, apputils::error>
 {
   std::ifstream input_file {
     path,
@@ -23,9 +23,9 @@ shader(const std::filesystem::path& path)
 
   if (!input_file.is_open())
   {
-    return std::expected<std::vector<char>, app_utils::error> {
+    return std::expected<std::vector<char>, apputils::error> {
       std::unexpect,
-      app_utils::error::shader_file_not_found,
+      apputils::error::shader_file_not_found,
     };
   }
 

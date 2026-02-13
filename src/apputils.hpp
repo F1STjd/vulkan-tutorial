@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string_view>
 
-namespace app_utils
+namespace apputils
 {
 enum class error : std::uint8_t
 {
@@ -36,4 +36,4 @@ to_string(error e) -> std::string_view
   return "unknown error";
 }
 
-} // namespace app_utils
+} // namespace apputils
