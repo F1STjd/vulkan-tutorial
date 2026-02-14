@@ -48,26 +48,27 @@ public:
   constexpr void
   run()
   {
-    auto init_result = //
-      init_window().and_then([ this ] -> std::expected<void, vkutils::error>
-        { return init_vulkan(); });
+    const auto result =
+      init_window()
+        .and_then([ this ] -> std::expected<void, vkutils::error>
+          { return init_vulkan(); })
+        .and_then([ this ] -> std::expected<void, vkutils::error>
+          { return main_loop(); });
 
-    if (!init_result.has_value()) [[unlikely]]
-    {
-      const auto& error = init_result.error();
-      const auto& file = error.location.file_name();
-      const auto& function = error.location.function_name();
-      const auto& line = error.location.line();
-      const auto& column = error.location.column();
-
-      std::println(std::cerr,
-        "{}: In function '{}':\n{}:{}:{}: error: during initialisation of an "
-        "Vulkan object got result code: {}",
-        file, function, file, line, column, error.to_string());
-      std::exit(EXIT_FAILURE);
-    }
-    main_loop();
+    if (!result.has_value()) [[unlikely]] { report_error(result.error()); }
     cleanup();
+  }
+
+  static constexpr void
+  report_error(const vkutils::error& error)
+  {
+    const auto& file = error.location.file_name();
+    const auto& function = error.location.function_name();
+    const auto& line = error.location.line();
+    const auto& column = error.location.column();
+
+    std::println(std::cerr, "{}: In function '{}':\n{}:{}:{}: error: {}", file,
+      function, file, line, column, error.to_string());
   }
 
 private:
@@ -106,16 +107,21 @@ private:
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_command_pool(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
-        { return create_command_buffer(); });
+        { return create_command_buffer(); })
+      .and_then([ this ] -> std::expected<void, vkutils::error>
+        { return create_sync_objects(); });
   }
 
-  constexpr void
-  main_loop()
+  constexpr auto
+  main_loop() -> std::expected<void, vkutils::error>
   {
     while (glfwWindowShouldClose(window_) == 0)
     {
       glfwPollEvents();
+      if (auto result = draw_frame(); !result) [[unlikely]] { return result; }
     }
+
+    return vkutils::locate(device_.waitIdle());
   }
 
   constexpr void
@@ -172,9 +178,11 @@ private:
     if (glfwCreateWindowSurface(*instance_, window_, nullptr, &_surface) != 0)
       [[unlikely]]
     {
-      return std::expected<void, vkutils::error> {
-        std::unexpect,
-        apputils::error::glfw_surface_creation_failed,
+      return std::unexpected {
+        vkutils::error {
+          .reason = apputils::error::glfw_surface_creation_failed,
+          .location = std::source_location::current(),
+        },
       };
     }
 
@@ -197,9 +205,11 @@ private:
               return {};
             }
           }
-          return std::expected<void, vkutils::error> {
-            std::unexpect,
-            apputils::error::no_suitable_gpu,
+          return std::unexpected {
+            vkutils::error {
+              .reason = apputils::error::no_suitable_gpu,
+              .location = std::source_location::current(),
+            },
           };
         });
   }
@@ -212,11 +222,15 @@ private:
 
     if (!graphics_index || !presentation_index)
     {
-      return std::expected<void, vkutils::error> {
-        std::unexpect,
-        apputils::error::missing_queue_families,
+      return std::unexpected {
+        vkutils::error {
+          .reason = apputils::error::missing_queue_families,
+          .location = std::source_location::current(),
+        },
       };
     }
+    graphics_queue_index_ = *graphics_index;
+    presentation_queue_index_ = *presentation_index;
 
     // tutorial says it could be used later (if not I'll remove it)
     [[maybe_unused]] vk::PhysicalDeviceFeatures device_features;

@@ -13,6 +13,8 @@ enum class error : std::uint8_t
   shader_file_not_found,
   missing_required_layer,
   missing_required_extension,
+  wait_for_fences_failed,
+  queue_present_failed
 };
 
 constexpr auto
@@ -32,6 +34,10 @@ to_string(error e) -> std::string_view
     return "required Vulkan layer not available";
   case error::missing_required_extension:
     return "required Vulkan extension not available";
+  case error::wait_for_fences_failed:
+    return "device called waitForFences and failed";
+  case error::queue_present_failed:
+    return "queue failed to present image";
   }
   return "unknown error";
 }
