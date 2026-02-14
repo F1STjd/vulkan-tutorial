@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <cstdlib>
 #include <expected>
 #include <format>
 #include <iostream>
