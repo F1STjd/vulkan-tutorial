@@ -35,7 +35,7 @@ to_string(error e) -> std::string_view
   case error::missing_required_extension:
     return "required Vulkan extension not available";
   case error::wait_for_fences_failed:
-    return "device called waitForFences and failed";
+    return "failed to wait for fence";
   case error::queue_present_failed:
     return "queue failed to present image";
   }

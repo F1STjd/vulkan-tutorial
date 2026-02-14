@@ -29,6 +29,8 @@
 static constexpr std::uint32_t initial_width { 800 };
 static constexpr std::uint32_t initial_height { 600 };
 
+static constexpr std::int32_t max_frames_in_flight { 2 };
+
 static constexpr std::array validation_layers { "VK_LAYER_KHRONOS_validation" };
 static constexpr std::array device_extensions {
   vk::KHRSwapchainExtensionName,
@@ -107,7 +109,7 @@ private:
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_command_pool(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
-        { return create_command_buffer(); })
+        { return create_command_buffers(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_sync_objects(); });
   }
@@ -469,25 +471,25 @@ private:
   }
 
   constexpr auto
-  create_command_buffer() -> std::expected<void, vkutils::error>
+  create_command_buffers() -> std::expected<void, vkutils::error>
   {
     vk::CommandBufferAllocateInfo command_buffer_allocate_info {
       .commandPool = command_pool_,
       .level = vk::CommandBufferLevel::ePrimary,
-      .commandBufferCount = 1,
+      .commandBufferCount = max_frames_in_flight,
     };
 
     return vkutils::locate(
       device_.allocateCommandBuffers(command_buffer_allocate_info))
-      .transform([ this ](auto&& command_buffers) noexcept -> auto
-        { command_buffer_ = std::move(command_buffers.front()); });
+      .transform(vkutils::store_into(command_buffers_));
   }
 
   constexpr auto
   record_command_buffer(std::uint32_t image_index)
     -> std::expected<void, vkutils::error>
   {
-    if (const auto result = command_buffer_.begin({}); !result.has_value())
+    const auto& command_buffer = command_buffers_[ frame_index_ ];
+    if (const auto result = command_buffer.begin({}); !result.has_value())
     {
       return vkutils::locate(result);
     }
@@ -516,10 +518,10 @@ private:
       .pColorAttachments = &attachment_info,
     };
 
-    command_buffer_.beginRendering(rendering_info);
-    command_buffer_.bindPipeline(
+    command_buffer.beginRendering(rendering_info);
+    command_buffer.bindPipeline(
       vk::PipelineBindPoint::eGraphics, graphics_pipeline_);
-    command_buffer_.setViewport(0,
+    command_buffer.setViewport(0,
       vk::Viewport {
         .x = 0.0F,
         .y = 0.0F,
@@ -528,13 +530,13 @@ private:
         .minDepth = 0.0F,
         .maxDepth = 1.0F,
       });
-    command_buffer_.setScissor(0,
+    command_buffer.setScissor(0,
       vk::Rect2D {
         .offset { .x = 0, .y = 0 },
         .extent = swapchain_extent_,
       });
-    command_buffer_.draw(3, 1, 0, 0);
-    command_buffer_.endRendering();
+    command_buffer.draw(3, 1, 0, 0);
+    command_buffer.endRendering();
 
     transition_image_layout(image_index,
       vk::ImageLayout::eColorAttachmentOptimal, vk::ImageLayout::ePresentSrcKHR,
@@ -542,36 +544,43 @@ private:
       vk::PipelineStageFlagBits2::eColorAttachmentOutput,
       vk::PipelineStageFlagBits2::eBottomOfPipe);
 
-    return vkutils::locate(command_buffer_.end());
+    return vkutils::locate(command_buffer.end());
   }
 
   constexpr auto
   create_sync_objects() -> std::expected<void, vkutils::error>
   {
-    return vkutils::locate(device_.createSemaphore({}))
-      .transform(vkutils::store_into(presentation_complete_semaphore_))
-      .and_then(
-        [ this ]() noexcept -> std::expected<void, vkutils::error>
-        {
-          return vkutils::locate(device_.createSemaphore({}))
-            .transform(vkutils::store_into(render_finished_semaphore_));
-        })
-      .and_then(
-        [ this ]() noexcept -> std::expected<void, vkutils::error>
-        {
-          return vkutils::locate(
-            device_.createFence(
-              { .flags = vk::FenceCreateFlagBits::eSignaled }))
-            .transform(vkutils::store_into(draw_fence_));
-        });
+    assert(presentation_complete_semaphores_.empty() &&
+      render_finished_semaphores_.empty() && in_flight_fences_.empty());
+
+    for (auto _ : std::views::iota(0UZ, swapchain_images_.size()))
+    {
+      auto sem = vkutils::locate(device_.createSemaphore({}));
+      if (!sem) [[unlikely]] { return std::unexpected { sem.error() }; }
+      render_finished_semaphores_.emplace_back(std::move(*sem));
+    }
+
+    for (auto _ : std::views::iota(0, max_frames_in_flight))
+    {
+      auto sem = vkutils::locate(device_.createSemaphore({}));
+      if (!sem) [[unlikely]] { return std::unexpected { sem.error() }; }
+      presentation_complete_semaphores_.emplace_back(std::move(*sem));
+
+      auto fence = vkutils::locate(
+        device_.createFence({ .flags = vk::FenceCreateFlagBits::eSignaled }));
+      if (!fence) [[unlikely]] { return std::unexpected { fence.error() }; }
+      in_flight_fences_.emplace_back(std::move(*fence));
+    }
+
+    return {};
   }
 
   constexpr auto
   draw_frame() -> std::expected<void, vkutils::error>
   {
-    const auto fence_result = device_.waitForFences(
-      *draw_fence_, vk::True, std::numeric_limits<std::uint64_t>::max());
-
+    const auto fence_result =
+      device_.waitForFences(*in_flight_fences_[ frame_index_ ], vk::True,
+        std::numeric_limits<std::uint64_t>::max());
     if (fence_result != vk::Result::eSuccess)
     {
       return std::unexpected {
@@ -584,13 +593,17 @@ private:
 
     const auto [ acquire_result, image_index ] =
       swapchain_.acquireNextImage(std::numeric_limits<std::uint64_t>::max(),
-        *presentation_complete_semaphore_, nullptr);
+        *presentation_complete_semaphores_[ frame_index_ ], nullptr);
 
-    return record_command_buffer(image_index)
+    return vkutils::locate(
+      device_.resetFences(*in_flight_fences_[ frame_index_ ]))
       .and_then([ this ]() noexcept -> std::expected<void, vkutils::error>
-        { return vkutils::locate(device_.resetFences(*draw_fence_)); })
+        { return vkutils::locate(command_buffers_[ frame_index_ ].reset()); })
       .and_then(
-        [ this ]() noexcept -> std::expected<void, vkutils::error>
+        [ this, &image_index ]() noexcept -> std::expected<void, vkutils::error>
+        { return record_command_buffer(image_index); })
+      .and_then(
+        [ this, &image_index ]() noexcept -> std::expected<void, vkutils::error>
         {
           vk::PipelineStageFlags wait_dst_stage_mask {
             vk::PipelineStageFlagBits::eColorAttachmentOutput
@@ -598,40 +611,49 @@ private:
 
           const vk::SubmitInfo submit_info {
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &*presentation_complete_semaphore_,
+            .pWaitSemaphores =
+              &*presentation_complete_semaphores_[ frame_index_ ],
             .pWaitDstStageMask = &wait_dst_stage_mask,
             .commandBufferCount = 1,
-            .pCommandBuffers = &*command_buffer_,
+            .pCommandBuffers = &*command_buffers_[ frame_index_ ],
             .signalSemaphoreCount = 1,
-            .pSignalSemaphores = &*render_finished_semaphore_,
+            .pSignalSemaphores = &*render_finished_semaphores_[ image_index ],
           };
 
-          return vkutils::locate(
-            graphics_queue_.submit(submit_info, *draw_fence_));
+          return vkutils::locate(graphics_queue_.submit(
+            submit_info, *in_flight_fences_[ frame_index_ ]));
         })
       .and_then(
         [ this, &image_index ]() noexcept -> std::expected<void, vkutils::error>
         {
           const vk::PresentInfoKHR present_info_KHR {
             .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &*render_finished_semaphore_,
+            .pWaitSemaphores = &*render_finished_semaphores_[ image_index ],
             .swapchainCount = 1,
             .pSwapchains = &*swapchain_,
             .pImageIndices = &image_index,
             .pResults = nullptr,
           };
 
-          if (const auto presentation_result =
-                graphics_queue_.presentKHR(present_info_KHR);
-            presentation_result != vk::Result::eSuccess)
+          const auto presentation_result =
+            graphics_queue_.presentKHR(present_info_KHR);
+
+          switch (presentation_result)
           {
+          case vk::Result::eSuccess:
+            break;
+          case vk::Result::eSuboptimalKHR:
+            frame_index_ = (frame_index_ + 1) % max_frames_in_flight;
             return std::unexpected {
               vkutils::error {
                 .reason = apputils::error::queue_present_failed,
                 .location = std::source_location::current(),
               },
             };
+          default:
+            break;
           }
+          frame_index_ = (frame_index_ + 1) % max_frames_in_flight;
           return {};
         });
   }
@@ -1005,7 +1027,7 @@ private:
       .pImageMemoryBarriers = &barrier,
     };
 
-    command_buffer_.pipelineBarrier2(dependency_info);
+    command_buffers_[ frame_index_ ].pipelineBarrier2(dependency_info);
   }
 
 private:
@@ -1025,14 +1047,16 @@ private:
   vk::raii::PipelineLayout pipeline_layout_ { nullptr };
   vk::raii::Pipeline graphics_pipeline_ { nullptr };
   vk::raii::CommandPool command_pool_ { nullptr };
-  vk::raii::CommandBuffer command_buffer_ { nullptr };
-  vk::raii::Semaphore presentation_complete_semaphore_ { nullptr };
-  vk::raii::Semaphore render_finished_semaphore_ { nullptr };
-  vk::raii::Fence draw_fence_ { nullptr };
+
+  std::vector<vk::raii::CommandBuffer> command_buffers_;
+  std::vector<vk::raii::Semaphore> presentation_complete_semaphores_;
+  std::vector<vk::raii::Semaphore> render_finished_semaphores_;
+  std::vector<vk::raii::Fence> in_flight_fences_;
 
   // 4 bytes alignment
   vk::SurfaceFormatKHR swapchain_surface_format_ {};
   vk::Extent2D swapchain_extent_ {};
   std::uint32_t graphics_queue_index_ { ~0U };
   std::uint32_t presentation_queue_index_ { ~0U };
+  std::uint32_t frame_index_ {};
 };
