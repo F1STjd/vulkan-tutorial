@@ -238,6 +238,7 @@ private:
     vk::StructureChain feature_chain {
       vk::PhysicalDeviceFeatures2 {},
       vk::PhysicalDeviceVulkan13Features {
+        .synchronization2 = vk::Bool32 { true },
         .dynamicRendering = vk::Bool32 { true },
       },
       vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT {
