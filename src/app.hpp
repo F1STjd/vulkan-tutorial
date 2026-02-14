@@ -545,6 +545,97 @@ private:
     return vkutils::locate(command_buffer_.end());
   }
 
+  constexpr auto
+  create_sync_objects() -> std::expected<void, vkutils::error>
+  {
+    return vkutils::locate(device_.createSemaphore({}))
+      .transform(vkutils::store_into(presentation_complete_semaphore_))
+      .and_then(
+        [ this ]() noexcept -> std::expected<void, vkutils::error>
+        {
+          return vkutils::locate(device_.createSemaphore({}))
+            .transform(vkutils::store_into(render_finished_semaphore_));
+        })
+      .and_then(
+        [ this ]() noexcept -> std::expected<void, vkutils::error>
+        {
+          return vkutils::locate(
+            device_.createFence(
+              { .flags = vk::FenceCreateFlagBits::eSignaled }))
+            .transform(vkutils::store_into(draw_fence_));
+        });
+  }
+
+  constexpr auto
+  draw_frame() -> std::expected<void, vkutils::error>
+  {
+    const auto fence_result = device_.waitForFences(
+      *draw_fence_, vk::True, std::numeric_limits<std::uint64_t>::max());
+
+    if (fence_result != vk::Result::eSuccess)
+    {
+      return std::unexpected {
+        vkutils::error {
+          .reason = apputils::error::wait_for_fences_failed,
+          .location = std::source_location::current(),
+        },
+      };
+    }
+
+    const auto [ acquire_result, image_index ] =
+      swapchain_.acquireNextImage(std::numeric_limits<std::uint64_t>::max(),
+        *presentation_complete_semaphore_, nullptr);
+
+    return record_command_buffer(image_index)
+      .and_then([ this ]() noexcept -> std::expected<void, vkutils::error>
+        { return vkutils::locate(device_.resetFences(*draw_fence_)); })
+      .and_then(
+        [ this ]() noexcept -> std::expected<void, vkutils::error>
+        {
+          vk::PipelineStageFlags wait_dst_stage_mask {
+            vk::PipelineStageFlagBits::eColorAttachmentOutput
+          };
+
+          const vk::SubmitInfo submit_info {
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = &*presentation_complete_semaphore_,
+            .pWaitDstStageMask = &wait_dst_stage_mask,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &*command_buffer_,
+            .signalSemaphoreCount = 1,
+            .pSignalSemaphores = &*render_finished_semaphore_,
+          };
+
+          return vkutils::locate(
+            graphics_queue_.submit(submit_info, *draw_fence_));
+        })
+      .and_then(
+        [ this, &image_index ]() noexcept -> std::expected<void, vkutils::error>
+        {
+          const vk::PresentInfoKHR present_info_KHR {
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = &*render_finished_semaphore_,
+            .swapchainCount = 1,
+            .pSwapchains = &*swapchain_,
+            .pImageIndices = &image_index,
+            .pResults = nullptr,
+          };
+
+          if (const auto presentation_result =
+                graphics_queue_.presentKHR(present_info_KHR);
+            presentation_result != vk::Result::eSuccess)
+          {
+            return std::unexpected {
+              vkutils::error {
+                .reason = apputils::error::queue_present_failed,
+                .location = std::source_location::current(),
+              },
+            };
+          }
+          return {};
+        });
+  }
+
 private:
   // TODO(Konrad): Refactor - maybe the vkutils::validate_required is bad
   // design
