@@ -30,7 +30,11 @@ static constexpr std::uint32_t initial_width { 800 };
 static constexpr std::uint32_t initial_height { 600 };
 
 static constexpr std::array validation_layers { "VK_LAYER_KHRONOS_validation" };
-static constexpr std::array device_extensions { vk::KHRSwapchainExtensionName };
+static constexpr std::array device_extensions {
+  vk::KHRSwapchainExtensionName,
+  vk::KHRShaderDrawParametersExtensionName,
+  vk::KHRSynchronization2ExtensionName,
+};
 
 #ifdef NDEBUG
 static constexpr bool enable_validation_layers { false };
