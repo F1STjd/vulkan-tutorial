@@ -99,7 +99,7 @@ private:
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_logical_device(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
-        { return create_swap_chain(); })
+        { return create_swapchain(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_image_views(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
@@ -272,7 +272,7 @@ private:
   }
 
   constexpr auto
-  create_swap_chain() -> std::expected<void, vkutils::error>
+  create_swapchain() -> std::expected<void, vkutils::error>
   {
     vk::SurfaceCapabilitiesKHR surface_capabilities;
     std::vector<vk::SurfaceFormatKHR> surface_formats;
@@ -286,14 +286,14 @@ private:
       .transform(
         [ &, this ]() noexcept -> void
         {
-          swap_chain_extent_ = choose_swap_extent(surface_capabilities);
-          swap_chain_surface_format_ =
+          swapchain_extent_ = choose_swap_extent(surface_capabilities);
+          swapchain_surface_format_ =
             choose_swap_surface_format(surface_formats);
         })
       .and_then(
         [ &, this ]() noexcept -> std::expected<void, vkutils::error>
         {
-          return create_swap_chain(
+          return create_swapchain(
             surface_capabilities, surface_presentation_modes);
         });
   }
@@ -301,14 +301,14 @@ private:
   constexpr auto
   create_image_views() -> std::expected<void, vkutils::error>
   {
-    swap_chain_image_views_.clear();
+    swapchain_image_views_.clear();
 
     vk::ImageViewCreateInfo image_view_info {
       .pNext = {},
       .flags = {},
       .image = {},
       .viewType = vk::ImageViewType::e2D,
-      .format = swap_chain_surface_format_.format,
+      .format = swapchain_surface_format_.format,
       .components = {},
       .subresourceRange {
         .aspectMask = vk::ImageAspectFlagBits::eColor,
@@ -319,7 +319,7 @@ private:
       },
     };
 
-    for (const auto& image : swap_chain_images_)
+    for (const auto& image : swapchain_images_)
     {
       image_view_info.image = image;
       auto image_view =
@@ -328,7 +328,7 @@ private:
       {
         return std::unexpected { image_view.error() };
       }
-      swap_chain_image_views_.emplace_back(std::move(image_view.value()));
+      swapchain_image_views_.emplace_back(std::move(image_view.value()));
     }
 
     return {};
@@ -446,7 +446,7 @@ private:
             },
             vk::PipelineRenderingCreateInfo {
               .colorAttachmentCount = 1,
-              .pColorAttachmentFormats = &swap_chain_surface_format_.format,
+              .pColorAttachmentFormats = &swapchain_surface_format_.format,
             },
           };
 
@@ -499,7 +499,7 @@ private:
 
     vk::ClearValue clear_color = vk::ClearColorValue { 0.0F, 0.0F, 0.0F, 1.0F };
     vk::RenderingAttachmentInfo attachment_info {
-      .imageView = swap_chain_image_views_[ image_index ],
+      .imageView = swapchain_image_views_[ image_index ],
       .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
       .loadOp = vk::AttachmentLoadOp::eClear,
       .storeOp = vk::AttachmentStoreOp::eStore,
@@ -508,7 +508,7 @@ private:
     vk::RenderingInfo rendering_info {
       .renderArea {
         .offset { .x = 0, .y = 0 },
-        .extent = swap_chain_extent_,
+        .extent = swapchain_extent_,
       },
       .layerCount = 1,
       .colorAttachmentCount = 1,
@@ -522,15 +522,15 @@ private:
       vk::Viewport {
         .x = 0.0F,
         .y = 0.0F,
-        .width = static_cast<float>(swap_chain_extent_.width),
-        .height = static_cast<float>(swap_chain_extent_.height),
+        .width = static_cast<float>(swapchain_extent_.width),
+        .height = static_cast<float>(swapchain_extent_.height),
         .minDepth = 0.0F,
         .maxDepth = 1.0F,
       });
     command_buffer_.setScissor(0,
       vk::Rect2D {
         .offset { .x = 0, .y = 0 },
-        .extent = swap_chain_extent_,
+        .extent = swapchain_extent_,
       });
     command_buffer_.draw(3, 1, 0, 0);
     command_buffer_.endRendering();
@@ -827,17 +827,17 @@ private:
   }
 
   constexpr auto
-  create_swap_chain(const vk::SurfaceCapabilitiesKHR& surface_capabilities,
+  create_swapchain(const vk::SurfaceCapabilitiesKHR& surface_capabilities,
     std::span<const vk::PresentModeKHR> surface_presentation_modes)
     -> std::expected<void, vkutils::error>
   {
-    const vk::SwapchainCreateInfoKHR swap_chain_info {
+    const vk::SwapchainCreateInfoKHR swapchain_info {
       .flags = vk::SwapchainCreateFlagsKHR(),
       .surface = *surface_,
       .minImageCount = choose_swap_min_image_count(surface_capabilities),
-      .imageFormat = swap_chain_surface_format_.format,
-      .imageColorSpace = swap_chain_surface_format_.colorSpace,
-      .imageExtent = swap_chain_extent_,
+      .imageFormat = swapchain_surface_format_.format,
+      .imageColorSpace = swapchain_surface_format_.colorSpace,
+      .imageExtent = swapchain_extent_,
       .imageArrayLayers = 1U,
       .imageUsage = vk::ImageUsageFlagBits::eColorAttachment,
       .imageSharingMode = vk::SharingMode::eExclusive,
@@ -848,24 +848,24 @@ private:
       .oldSwapchain = nullptr,
     };
 
-    return create_swap_chain_impl(swap_chain_info)
+    return create_swapchain_impl(swapchain_info)
       .and_then([ this ]() -> std::expected<void, vkutils::error>
-        { return get_swap_chain_images(); });
+        { return get_swapchain_images(); });
   }
 
   constexpr auto
-  create_swap_chain_impl(const vk::SwapchainCreateInfoKHR& swap_chain_info)
+  create_swapchain_impl(const vk::SwapchainCreateInfoKHR& swapchain_info)
     -> std::expected<void, vkutils::error>
   {
-    return vkutils::locate(device_.createSwapchainKHR(swap_chain_info))
-      .transform(vkutils::store_into(swap_chain_));
+    return vkutils::locate(device_.createSwapchainKHR(swapchain_info))
+      .transform(vkutils::store_into(swapchain_));
   }
 
   constexpr auto
-  get_swap_chain_images() -> std::expected<void, vkutils::error>
+  get_swapchain_images() -> std::expected<void, vkutils::error>
   {
-    return vkutils::locate(swap_chain_.getImages())
-      .transform(vkutils::store_into(swap_chain_images_));
+    return vkutils::locate(swapchain_.getImages())
+      .transform(vkutils::store_into(swapchain_images_));
   }
 
   [[nodiscard]]
@@ -897,7 +897,7 @@ private:
       .newLayout = new_layout,
       .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
       .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-      .image = swap_chain_images_[ image_index ],
+      .image = swapchain_images_[ image_index ],
       .subresourceRange {
         .aspectMask = vk::ImageAspectFlagBits::eColor,
         .baseMipLevel = 0,
@@ -927,16 +927,20 @@ private:
   vk::raii::Device device_ { nullptr };
   vk::raii::Queue graphics_queue_ { nullptr };
   vk::raii::Queue presentation_queue_ { nullptr };
-  vk::raii::SwapchainKHR swap_chain_ { nullptr };
-  std::vector<vk::Image> swap_chain_images_;
-  std::vector<vk::raii::ImageView> swap_chain_image_views_;
+  vk::raii::SwapchainKHR swapchain_ { nullptr };
+  std::vector<vk::Image> swapchain_images_;
+  std::vector<vk::raii::ImageView> swapchain_image_views_;
   vk::raii::PipelineLayout pipeline_layout_ { nullptr };
   vk::raii::Pipeline graphics_pipeline_ { nullptr };
   vk::raii::CommandPool command_pool_ { nullptr };
   vk::raii::CommandBuffer command_buffer_ { nullptr };
+  vk::raii::Semaphore presentation_complete_semaphore_ { nullptr };
+  vk::raii::Semaphore render_finished_semaphore_ { nullptr };
+  vk::raii::Fence draw_fence_ { nullptr };
 
   // 4 bytes alignment
-  vk::SurfaceFormatKHR swap_chain_surface_format_ {};
-  vk::Extent2D swap_chain_extent_ {};
+  vk::SurfaceFormatKHR swapchain_surface_format_ {};
+  vk::Extent2D swapchain_extent_ {};
   std::uint32_t graphics_queue_index_ { ~0U };
+  std::uint32_t presentation_queue_index_ { ~0U };
 };
