@@ -150,10 +150,14 @@ private:
   constexpr void
   cleanup()
   {
+    cleanup_swapchain();
+
     glfwDestroyWindow(window_);
     glfwTerminate();
   }
 
+  // TODO(Konrad): Layers and extensions are checked if supported, not "got" -
+  // maybe change the name of the functions
   constexpr auto
   create_instance() -> std::expected<void, vkutils::error>
   {
@@ -204,12 +208,11 @@ private:
       return std::unexpected {
         vkutils::error {
           .reason = apputils::error::glfw_surface_creation_failed,
-          .location = std::source_location::current(),
         },
       };
     }
 
-    surface_ = vk::raii::SurfaceKHR(instance_, _surface);
+    surface_ = vk::raii::SurfaceKHR { instance_, _surface };
     return {};
   }
 
@@ -231,12 +234,14 @@ private:
           return std::unexpected {
             vkutils::error {
               .reason = apputils::error::no_suitable_gpu,
-              .location = std::source_location::current(),
             },
           };
         });
   }
 
+  // TODO(Konrad): tutorial was mixing 2-way approach (graphics/presentation
+  // queue) with single queue. Read about the advantages/requirements that would
+  // be more suitable (where and when)
   constexpr auto
   create_logical_device() -> std::expected<void, vkutils::error>
   {
@@ -248,15 +253,11 @@ private:
       return std::unexpected {
         vkutils::error {
           .reason = apputils::error::missing_queue_families,
-          .location = std::source_location::current(),
         },
       };
     }
     graphics_queue_index_ = *graphics_index;
     presentation_queue_index_ = *presentation_index;
-
-    // tutorial says it could be used later (if not I'll remove it)
-    [[maybe_unused]] vk::PhysicalDeviceFeatures device_features;
 
     vk::StructureChain feature_chain {
       vk::PhysicalDeviceFeatures2 {},
@@ -607,7 +608,6 @@ private:
       return std::unexpected {
         vkutils::error {
           .reason = apputils::error::wait_for_fences_failed,
-          .location = std::source_location::current(),
         },
       };
     }
@@ -808,7 +808,7 @@ private:
       .apiVersion = vk::ApiVersion14,
     };
 
-    const vk::InstanceCreateInfo info {
+    const vk::InstanceCreateInfo instance_info {
       .pApplicationInfo = &app_info,
       .enabledLayerCount = static_cast<std::uint32_t>(layers.size()),
       .ppEnabledLayerNames = layers.data(),
@@ -816,7 +816,7 @@ private:
       .ppEnabledExtensionNames = extensions.data(),
     };
 
-    return vkutils::locate(context_.createInstance(info))
+    return vkutils::locate(context_.createInstance(instance_info))
       .transform(vkutils::store_into(instance_));
   }
 

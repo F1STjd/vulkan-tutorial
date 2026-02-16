@@ -16,7 +16,7 @@ namespace vkutils
 struct error
 {
   std::variant<vk::Result, apputils::error> reason;
-  std::source_location location;
+  std::source_location location = std::source_location::current();
 
   template<class... Ts>
   struct overloaded : Ts...
