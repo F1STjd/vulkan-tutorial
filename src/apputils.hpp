@@ -7,6 +7,7 @@ namespace apputils
 {
 enum class error : std::uint8_t
 {
+  glfw_window_creation_failed,
   glfw_surface_creation_failed,
   no_suitable_gpu,
   missing_queue_families,
@@ -22,6 +23,8 @@ to_string(error e) -> std::string_view
 {
   switch (e)
   {
+  case error::glfw_window_creation_failed:
+    return "GLFW window creation failed";
   case error::glfw_surface_creation_failed:
     return "GLFW surface creation failed";
   case error::no_suitable_gpu:

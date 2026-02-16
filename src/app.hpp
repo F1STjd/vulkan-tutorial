@@ -73,7 +73,6 @@ public:
   }
 
 private:
-  // TODO(Konrad): change error type to some glfw related one
   constexpr auto
   init_window() -> std::expected<void, vkutils::error>
   {
@@ -83,6 +82,14 @@ private:
 
     window_ = glfwCreateWindow(
       initial_width, initial_height, "Vulkan", nullptr, nullptr);
+
+    if (window_ == nullptr)
+    {
+      return std::expected<void, vkutils::error> {
+        std::unexpect,
+        apputils::error::glfw_window_creation_failed,
+      };
+    }
 
     return {};
   }
