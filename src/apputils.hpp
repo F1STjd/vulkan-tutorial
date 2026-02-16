@@ -15,6 +15,7 @@ enum class error : std::uint8_t
   missing_required_layer,
   missing_required_extension,
   wait_for_fences_failed,
+  next_image_acquire_failed,
   queue_present_failed
 };
 
@@ -39,6 +40,8 @@ to_string(error e) -> std::string_view
     return "required Vulkan extension not available";
   case error::wait_for_fences_failed:
     return "failed to wait for fence";
+  case error::next_image_acquire_failed:
+    return "failed to acquire next image";
   case error::queue_present_failed:
     return "queue failed to present image";
   }

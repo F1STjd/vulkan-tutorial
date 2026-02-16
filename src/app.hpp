@@ -9,9 +9,11 @@
 #include <optional>
 #include <print>
 #include <ranges>
+#include <source_location>
 #include <utility>
 #include <vector>
 
+#define VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS 1
 #define VULKAN_HPP_NO_EXCEPTIONS
 #define VULKAN_HPP_USE_STD_EXPECTED
@@ -78,20 +80,33 @@ private:
   {
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
     window_ = glfwCreateWindow(
       initial_width, initial_height, "Vulkan", nullptr, nullptr);
 
     if (window_ == nullptr)
     {
-      return std::expected<void, vkutils::error> {
-        std::unexpect,
-        apputils::error::glfw_window_creation_failed,
+      return std::unexpected {
+        vkutils::error {
+          .reason = apputils::error::glfw_window_creation_failed,
+        },
       };
     }
 
+    glfwSetWindowUserPointer(window_, this);
+    glfwSetFramebufferSizeCallback(window_, framebuffer_resize_callback);
+
     return {};
+  }
+
+  static constexpr void
+  framebuffer_resize_callback(GLFWwindow* window,
+    [[maybe_unused]] std::int32_t width, [[maybe_unused]] std::int32_t height)
+  {
+    auto* const window_ptr =
+      reinterpret_cast<app*>(glfwGetWindowUserPointer(window));
+    window_ptr->framebuffer_resized_ = true;
   }
 
   constexpr auto
@@ -601,6 +616,24 @@ private:
       swapchain_.acquireNextImage(std::numeric_limits<std::uint64_t>::max(),
         *presentation_complete_semaphores_[ frame_index_ ], nullptr);
 
+    if (acquire_result == vk::Result::eErrorOutOfDateKHR)
+    {
+      return recreate_swapchain();
+    }
+
+    if (acquire_result != vk::Result::eSuccess &&
+      acquire_result != vk::Result::eSuboptimalKHR)
+    {
+      assert(acquire_result == vk::Result::eTimeout ||
+        acquire_result == vk::Result::eNotReady);
+
+      return std::unexpected {
+        vkutils::error {
+          .reason = apputils::error::next_image_acquire_failed,
+        },
+      };
+    }
+
     return vkutils::locate(
       device_.resetFences(*in_flight_fences_[ frame_index_ ]))
       .and_then([ this ]() noexcept -> std::expected<void, vkutils::error>
@@ -644,24 +677,64 @@ private:
           const auto presentation_result =
             graphics_queue_.presentKHR(present_info_KHR);
 
-          switch (presentation_result)
+          if ((presentation_result == vk::Result::eSuboptimalKHR) ||
+            (presentation_result == vk::Result::eErrorOutOfDateKHR) ||
+            framebuffer_resized_)
           {
-          case vk::Result::eSuccess:
-            break;
-          case vk::Result::eSuboptimalKHR:
-            frame_index_ = (frame_index_ + 1) % max_frames_in_flight;
+            framebuffer_resized_ = false;
+            return recreate_swapchain();
+          }
+
+          if (presentation_result != vk::Result::eSuccess)
+          {
             return std::unexpected {
               vkutils::error {
                 .reason = apputils::error::queue_present_failed,
-                .location = std::source_location::current(),
               },
             };
-          default:
-            break;
           }
+
           frame_index_ = (frame_index_ + 1) % max_frames_in_flight;
           return {};
         });
+  }
+
+  //  https://docs.vulkan.org/tutorial/latest/03_Drawing_a_triangle/04_Swap_chain_recreation.html
+  //  says: The disadvantage of this approach is that we need to stop all
+  //  renderings before creating the new swap chain. It is possible to create a
+  //  new swap chain while drawing commands on an image from the old swap chain
+  //  are still in-flight. You need to pass the previous swap chain to the
+  //  oldSwapchain field in the VkSwapchainCreateInfoKHR struct and destroy the
+  //  old swap chain as soon as you’ve finished using it.
+  constexpr auto
+  recreate_swapchain() -> std::expected<void, vkutils::error>
+  {
+    std::int32_t width {};
+    std::int32_t height {};
+    glfwGetFramebufferSize(window_, &width, &height);
+    while (width == 0 || height == 0)
+    {
+      glfwGetFramebufferSize(window_, &width, &height);
+      glfwWaitEvents();
+    }
+
+    return vkutils::locate(device_.waitIdle())
+      .and_then(
+        [ this ]() -> std::expected<void, vkutils::error>
+        {
+          cleanup_swapchain();
+
+          return create_swapchain();
+        })
+      .and_then([ this ]() -> std::expected<void, vkutils::error>
+        { return create_image_views(); });
+  }
+
+  constexpr void
+  cleanup_swapchain()
+  {
+    swapchain_image_views_.clear();
+    swapchain_ = nullptr;
   }
 
 private:
@@ -1065,4 +1138,7 @@ private:
   std::uint32_t graphics_queue_index_ { ~0U };
   std::uint32_t presentation_queue_index_ { ~0U };
   std::uint32_t frame_index_ {};
+
+  // 1 byte alignment
+  bool framebuffer_resized_ {};
 };
