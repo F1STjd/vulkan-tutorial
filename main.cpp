@@ -1,7 +1,7 @@
 #include "src/app.hpp"
 
 auto
-main() -> std::int32_t
+main() -> int
 {
   app app {};
   app.run();
