@@ -17,7 +17,7 @@
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS 1
 #define VULKAN_HPP_NO_EXCEPTIONS
 #define VULKAN_HPP_USE_STD_EXPECTED
-#include "vulkan/vulkan.hpp"
+#include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>
 
 #define GLFW_INCLUDE_VULKAN
