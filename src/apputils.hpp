@@ -14,6 +14,7 @@ enum class error : std::uint8_t
   shader_file_not_found,
   missing_required_layer,
   missing_required_extension,
+  search_for_memory_type_failed,
   wait_for_fences_failed,
   next_image_acquire_failed,
   queue_present_failed
@@ -38,6 +39,8 @@ to_string(error e) -> std::string_view
     return "required Vulkan layer not available";
   case error::missing_required_extension:
     return "required Vulkan extension not available";
+  case error::search_for_memory_type_failed:
+    return "failed to find suitable memory type";
   case error::wait_for_fences_failed:
     return "failed to wait for fence";
   case error::next_image_acquire_failed:

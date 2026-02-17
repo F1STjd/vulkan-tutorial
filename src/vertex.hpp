@@ -45,7 +45,7 @@ struct vertex
 static constexpr std::array example_vertices {
   vertex {
     .position { 0.0F, -0.5F },
-    .color { 1.0F, 0.0F, 0.0F },
+    .color { 1.0F, 1.0F, 1.0F },
   },
   vertex {
     .position { 0.5F, 0.5F },

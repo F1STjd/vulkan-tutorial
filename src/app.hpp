@@ -131,6 +131,8 @@ private:
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_command_pool(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
+        { return create_vertex_buffer(); })
+      .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_command_buffers(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_sync_objects(); });
@@ -504,6 +506,35 @@ private:
   }
 
   constexpr auto
+  create_vertex_buffer() -> std::expected<void, vkutils::error>
+  {
+    vk::BufferCreateInfo buffer_info {
+      .size = sizeof(vertex) * example_vertices.size(),
+      .usage = vk::BufferUsageFlagBits::eVertexBuffer,
+      .sharingMode = vk::SharingMode::eExclusive,
+    };
+
+    return vkutils::locate(device_.createBuffer(buffer_info))
+      .transform(vkutils::store_into(vertex_buffer_))
+      .and_then(
+        [ this ]() noexcept -> std::expected<void, vkutils::error>
+        {
+          vk::MemoryRequirements memory_requirements =
+            vertex_buffer_.getMemoryRequirements();
+          return allocate_memory(memory_requirements, vertex_buffer_memory_);
+        })
+      .and_then(
+        [ this ]() noexcept -> std::expected<void, vkutils::error>
+        {
+          return vkutils::locate(
+            vertex_buffer_.bindMemory(*vertex_buffer_memory_, 0));
+        })
+      .and_then(
+        [ this, &buffer_info ]() noexcept -> std::expected<void, vkutils::error>
+        { return map_memory(buffer_info, vertex_buffer_memory_); });
+  }
+
+  constexpr auto
   create_command_buffers() -> std::expected<void, vkutils::error>
   {
     vk::CommandBufferAllocateInfo command_buffer_allocate_info {
@@ -554,6 +585,7 @@ private:
     command_buffer.beginRendering(rendering_info);
     command_buffer.bindPipeline(
       vk::PipelineBindPoint::eGraphics, graphics_pipeline_);
+    command_buffer.bindVertexBuffers(0, *vertex_buffer_, { 0 });
     command_buffer.setViewport(0,
       vk::Viewport {
         .x = 0.0F,
@@ -568,7 +600,7 @@ private:
         .offset { .x = 0, .y = 0 },
         .extent = swapchain_extent_,
       });
-    command_buffer.draw(3, 1, 0, 0);
+    command_buffer.draw(example_vertices.size(), 1, 0, 0);
     command_buffer.endRendering();
 
     transition_image_layout(image_index,
@@ -1120,6 +1152,64 @@ private:
     command_buffers_[ frame_index_ ].pipelineBarrier2(dependency_info);
   }
 
+  constexpr auto
+  find_memory_type(
+    std::uint32_t type_filter, vk::MemoryPropertyFlags properties)
+    -> std::expected<std::uint32_t, vkutils::error>
+  {
+    vk::PhysicalDeviceMemoryProperties memory_properties =
+      physical_device_.getMemoryProperties();
+
+    for (auto i : std::views::iota(0U, memory_properties.memoryTypeCount))
+    {
+      if (((type_filter & (1 << i)) != 0U) &&
+        (memory_properties.memoryTypes[ i ].propertyFlags & properties) ==
+          properties)
+      {
+        return i;
+      }
+    }
+
+    return std::unexpected {
+      vkutils::error {
+        .reason = apputils::error::search_for_memory_type_failed,
+      },
+    };
+  }
+
+  constexpr auto
+  allocate_memory(vk::MemoryRequirements& memory_requirements,
+    vk::raii::DeviceMemory& memory) -> std::expected<void, vkutils::error>
+  {
+    return find_memory_type(memory_requirements.memoryTypeBits,
+      vk::MemoryPropertyFlagBits::eHostVisible |
+        vk::MemoryPropertyFlagBits::eHostCoherent)
+      .and_then(
+        [ &, this ](std::uint32_t memory_type) noexcept
+          -> std::expected<void, vkutils::error>
+        {
+          vk::MemoryAllocateInfo memory_allocate_info {
+            .allocationSize = memory_requirements.size,
+            .memoryTypeIndex = memory_type,
+          };
+          return vkutils::locate(device_.allocateMemory(memory_allocate_info))
+            .transform(vkutils::store_into(memory));
+        });
+  }
+
+  constexpr auto
+  map_memory(vk::BufferCreateInfo& buffer_info, vk::raii::DeviceMemory& memory)
+    -> std::expected<void, vkutils::error>
+  {
+    return vkutils::locate(memory.mapMemory(0, buffer_info.size))
+      .transform(
+        [ & ](void* data) noexcept -> void
+        {
+          std::memcpy(data, example_vertices.data(), buffer_info.size);
+          memory.unmapMemory();
+        });
+  }
+
 private:
   // 8 bytes alignment
   GLFWwindow* window_ {};
@@ -1137,6 +1227,8 @@ private:
   vk::raii::PipelineLayout pipeline_layout_ { nullptr };
   vk::raii::Pipeline graphics_pipeline_ { nullptr };
   vk::raii::CommandPool command_pool_ { nullptr };
+  vk::raii::Buffer vertex_buffer_ { nullptr };
+  vk::raii::DeviceMemory vertex_buffer_memory_ { nullptr };
 
   std::vector<vk::raii::CommandBuffer> command_buffers_;
   std::vector<vk::raii::Semaphore> presentation_complete_semaphores_;
