@@ -25,6 +25,7 @@
 
 #include "../lib/load/load.hpp"
 #include "apputils.hpp"
+#include "vertex.hpp"
 #include "vkutils.hpp"
 
 static constexpr std::uint32_t initial_width { 800 };
@@ -390,7 +391,17 @@ private:
       },
     };
 
-    vk::PipelineVertexInputStateCreateInfo vertex_input_info;
+    constexpr auto binding_description = vertex::get_binding_description();
+    constexpr auto attribute_descriptions =
+      vertex::get_attribute_descriptions();
+    vk::PipelineVertexInputStateCreateInfo vertex_input_info {
+      .vertexBindingDescriptionCount = 1,
+      .pVertexBindingDescriptions = &binding_description,
+      .vertexAttributeDescriptionCount =
+        static_cast<std::uint32_t>(attribute_descriptions.size()),
+      .pVertexAttributeDescriptions = attribute_descriptions.data(),
+    };
+
     vk::PipelineInputAssemblyStateCreateInfo input_assembly_info {
       .topology = vk::PrimitiveTopology::eTriangleList
     };
