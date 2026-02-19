@@ -133,6 +133,8 @@ private:
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_vertex_buffer(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
+        { return create_index_buffer(); })
+      .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_command_buffers(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_sync_objects(); });
@@ -505,33 +507,80 @@ private:
       .transform(vkutils::store_into(command_pool_));
   }
 
+  // https://docs.vulkan.org/tutorial/latest/04_Vertex_buffers/03_Index_buffer.html
+  // says: The previous chapter already mentioned that you should allocate
+  // multiple resources like buffers from a single memory allocation, but in
+  // fact you should go a step further. Driver developers recommend that you
+  // also store multiple buffers, like the vertex and index buffer, into a
+  // single VkBuffer and use offsets in commands like vkCmdBindVertexBuffers.
+  // The advantage is that your data is more cache friendly in that case,
+  // because it’s closer together. It is even possible to reuse the same chunk
+  // of memory for multiple resources if they are not used during the same
+  // render operations, provided that their data is refreshed, of course. This
+  // is known as aliasing and some Vulkan functions have explicit flags to
+  // specify that you want to do this.
   constexpr auto
   create_vertex_buffer() -> std::expected<void, vkutils::error>
   {
-    vk::BufferCreateInfo buffer_info {
-      .size = sizeof(vertex) * example_vertices.size(),
-      .usage = vk::BufferUsageFlagBits::eVertexBuffer,
-      .sharingMode = vk::SharingMode::eExclusive,
-    };
+    constexpr vk::DeviceSize buffer_size =
+      sizeof(vertex) * example_vertices.size();
 
-    return vkutils::locate(device_.createBuffer(buffer_info))
-      .transform(vkutils::store_into(vertex_buffer_))
+    vk::raii::Buffer staging_buffer { nullptr };
+    vk::raii::DeviceMemory staging_buffer_memory { nullptr };
+
+    return create_buffer(buffer_size, vk::BufferUsageFlagBits::eTransferSrc,
+      vk::MemoryPropertyFlagBits::eHostVisible |
+        vk::MemoryPropertyFlagBits::eHostCoherent,
+      staging_buffer, staging_buffer_memory)
       .and_then(
-        [ this ]() noexcept -> std::expected<void, vkutils::error>
+        [ & ]() noexcept -> std::expected<void, vkutils::error>
         {
-          vk::MemoryRequirements memory_requirements =
-            vertex_buffer_.getMemoryRequirements();
-          return allocate_memory(memory_requirements, vertex_buffer_memory_);
+          return map_memory(
+            buffer_size, staging_buffer_memory, example_vertices);
         })
       .and_then(
         [ this ]() noexcept -> std::expected<void, vkutils::error>
         {
-          return vkutils::locate(
-            vertex_buffer_.bindMemory(*vertex_buffer_memory_, 0));
+          return create_buffer(buffer_size,
+            vk::BufferUsageFlagBits::eVertexBuffer |
+              vk::BufferUsageFlagBits::eTransferDst,
+            vk::MemoryPropertyFlagBits::eDeviceLocal, vertex_buffer_,
+            vertex_buffer_memory_);
+        })
+      .and_then([ &, this ]() noexcept -> std::expected<void, vkutils::error>
+        { return copy_buffer(staging_buffer, vertex_buffer_, buffer_size); });
+  }
+
+  constexpr auto
+  create_index_buffer() -> std::expected<void, vkutils::error>
+  {
+    constexpr vk::DeviceSize buffer_size =
+      sizeof(example_indices[ 0 ]) * example_indices.size();
+
+    vk::raii::Buffer staging_buffer { nullptr };
+    vk::raii::DeviceMemory staging_buffer_memory { nullptr };
+
+    return create_buffer(buffer_size, vk::BufferUsageFlagBits::eTransferSrc,
+      vk::MemoryPropertyFlagBits::eHostVisible |
+        vk::MemoryPropertyFlagBits::eHostCoherent,
+      staging_buffer, staging_buffer_memory)
+      .and_then(
+        [ & ]() noexcept -> std::expected<void, vkutils::error>
+        {
+          return map_memory(
+            buffer_size, staging_buffer_memory, example_indices);
         })
       .and_then(
-        [ this, &buffer_info ]() noexcept -> std::expected<void, vkutils::error>
-        { return map_memory(buffer_info, vertex_buffer_memory_); });
+        [ this ]() noexcept -> std::expected<void, vkutils::error>
+        {
+          return create_buffer(buffer_size,
+            vk::BufferUsageFlagBits::eIndexBuffer |
+              vk::BufferUsageFlagBits::eTransferDst,
+            vk::MemoryPropertyFlagBits::eDeviceLocal, index_buffer_,
+            index_buffer_memory_);
+        })
+      .and_then([ &, this ]() noexcept -> std::expected<void, vkutils::error>
+        { return copy_buffer(staging_buffer, index_buffer_, buffer_size); });
   }
 
   constexpr auto
@@ -586,6 +635,7 @@ private:
     command_buffer.bindPipeline(
       vk::PipelineBindPoint::eGraphics, graphics_pipeline_);
     command_buffer.bindVertexBuffers(0, *vertex_buffer_, { 0 });
+    command_buffer.bindIndexBuffer(*index_buffer_, 0, vk::IndexType::eUint32);
     command_buffer.setViewport(0,
       vk::Viewport {
         .x = 0.0F,
@@ -600,7 +650,7 @@ private:
         .offset { .x = 0, .y = 0 },
         .extent = swapchain_extent_,
       });
-    command_buffer.draw(example_vertices.size(), 1, 0, 0);
+    command_buffer.drawIndexed(example_indices.size(), 1, 0, 0, 0);
     command_buffer.endRendering();
 
     transition_image_layout(image_index,
@@ -1153,6 +1203,30 @@ private:
   }
 
   constexpr auto
+  create_buffer(vk::DeviceSize size, vk::BufferUsageFlags usage,
+    vk::MemoryPropertyFlags properties, vk::raii::Buffer& buffer,
+    vk::raii::DeviceMemory& buffer_memory)
+    -> std::expected<void, vkutils::error>
+  {
+    vk::BufferCreateInfo buffer_info {
+      .size = size,
+      .usage = usage,
+      .sharingMode = vk::SharingMode::eExclusive,
+    };
+
+    return vkutils::locate(device_.createBuffer(buffer_info))
+      .transform(vkutils::store_into(buffer))
+      .and_then(
+        [ & ]() noexcept -> std::expected<void, vkutils::error>
+        {
+          vk::MemoryRequirements requirements = buffer.getMemoryRequirements();
+          return allocate_memory(buffer_memory, requirements, properties);
+        })
+      .and_then([ & ]() noexcept -> std::expected<void, vkutils::error>
+        { return vkutils::locate(buffer.bindMemory(*buffer_memory, 0)); });
+  }
+
+  constexpr auto
   find_memory_type(
     std::uint32_t type_filter, vk::MemoryPropertyFlags properties)
     -> std::expected<std::uint32_t, vkutils::error>
@@ -1178,18 +1252,17 @@ private:
   }
 
   constexpr auto
-  allocate_memory(vk::MemoryRequirements& memory_requirements,
-    vk::raii::DeviceMemory& memory) -> std::expected<void, vkutils::error>
+  allocate_memory(vk::raii::DeviceMemory& memory,
+    vk::MemoryRequirements requirements, vk::MemoryPropertyFlags properties)
+    -> std::expected<void, vkutils::error>
   {
-    return find_memory_type(memory_requirements.memoryTypeBits,
-      vk::MemoryPropertyFlagBits::eHostVisible |
-        vk::MemoryPropertyFlagBits::eHostCoherent)
+    return find_memory_type(requirements.memoryTypeBits, properties)
       .and_then(
         [ &, this ](std::uint32_t memory_type) noexcept
           -> std::expected<void, vkutils::error>
         {
           vk::MemoryAllocateInfo memory_allocate_info {
-            .allocationSize = memory_requirements.size,
+            .allocationSize = requirements.size,
             .memoryTypeIndex = memory_type,
           };
           return vkutils::locate(device_.allocateMemory(memory_allocate_info))
@@ -1198,15 +1271,70 @@ private:
   }
 
   constexpr auto
-  map_memory(vk::BufferCreateInfo& buffer_info, vk::raii::DeviceMemory& memory)
+  map_memory(vk::DeviceSize size, vk::raii::DeviceMemory& memory,
+    std::ranges::range auto&& src_data) -> std::expected<void, vkutils::error>
+  {
+    return vkutils::locate(memory.mapMemory(0, size))
+      .transform(
+        [ & ](void* dst_data) noexcept -> void
+        {
+          std::memcpy(dst_data, src_data.data(), size);
+          memory.unmapMemory();
+        });
+  }
+
+  // https://docs.vulkan.org/tutorial/latest/04_Vertex_buffers/02_Staging_buffer.html
+  // says: You may wish to create a separate command pool for these kinds of
+  // short-lived buffers, because the implementation may be able to apply memory
+  // allocation optimizations. You should use the
+  // VK_COMMAND_POOL_CREATE_TRANSIENT_BIT flag during command pool generation in
+  // that case.
+  constexpr auto
+  copy_buffer(vk::raii::Buffer& source_buffer,
+    vk::raii::Buffer& destination_buffer, vk::DeviceSize size)
     -> std::expected<void, vkutils::error>
   {
-    return vkutils::locate(memory.mapMemory(0, buffer_info.size))
-      .transform(
-        [ & ](void* data) noexcept -> void
+    vk::CommandBufferAllocateInfo allocate_info {
+      .commandPool = command_pool_,
+      .level = vk::CommandBufferLevel::ePrimary,
+      .commandBufferCount = 1,
+    };
+
+    return vkutils::locate(device_.allocateCommandBuffers(allocate_info))
+      .and_then(
+        [ &, this ](
+          auto&& buffers) noexcept -> std::expected<void, vkutils::error>
         {
-          std::memcpy(data, example_vertices.data(), buffer_info.size);
-          memory.unmapMemory();
+          auto& command_copy_buffer = buffers.front();
+          return vkutils::locate(
+            command_copy_buffer.begin(vk::CommandBufferBeginInfo {
+              .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
+            }))
+            .transform(
+              [ & ]() noexcept -> void
+              {
+                command_copy_buffer.copyBuffer(*source_buffer,
+                  *destination_buffer,
+                  vk::BufferCopy {
+                    .srcOffset = 0,
+                    .dstOffset = 0,
+                    .size = size,
+                  });
+              })
+            .and_then([ & ]() noexcept -> std::expected<void, vkutils::error>
+              { return vkutils::locate(command_copy_buffer.end()); })
+            .and_then(
+              [ &, this ]() noexcept -> std::expected<void, vkutils::error>
+              {
+                return vkutils::locate(graphics_queue_.submit(
+                  vk::SubmitInfo {
+                    .commandBufferCount = 1,
+                    .pCommandBuffers = &*command_copy_buffer,
+                  },
+                  nullptr));
+              })
+            .and_then([ this ]() noexcept -> std::expected<void, vkutils::error>
+              { return vkutils::locate(graphics_queue_.waitIdle()); });
         });
   }
 
@@ -1229,6 +1357,8 @@ private:
   vk::raii::CommandPool command_pool_ { nullptr };
   vk::raii::Buffer vertex_buffer_ { nullptr };
   vk::raii::DeviceMemory vertex_buffer_memory_ { nullptr };
+  vk::raii::Buffer index_buffer_ { nullptr };
+  vk::raii::DeviceMemory index_buffer_memory_ { nullptr };
 
   std::vector<vk::raii::CommandBuffer> command_buffers_;
   std::vector<vk::raii::Semaphore> presentation_complete_semaphores_;
