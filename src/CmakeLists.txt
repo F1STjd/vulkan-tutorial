@@ -9,6 +9,7 @@ target_sources(app
       vkutils.hpp
       apputils.hpp
       vertex.hpp
+      uniforms.hpp
 )
 
 target_link_libraries(app

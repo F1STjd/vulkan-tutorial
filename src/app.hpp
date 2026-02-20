@@ -1,6 +1,20 @@
 #pragma once
+#define VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS
+#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS 1
+#define VULKAN_HPP_NO_EXCEPTIONS
+#define VULKAN_HPP_USE_STD_EXPECTED
+#include <vulkan/vulkan.hpp>
+#include <vulkan/vulkan_raii.hpp>
+
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
+
+#define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <expected>
 #include <format>
@@ -13,18 +27,9 @@
 #include <utility>
 #include <vector>
 
-#define VULKAN_HPP_HANDLE_ERROR_OUT_OF_DATE_AS_SUCCESS
-#define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS 1
-#define VULKAN_HPP_NO_EXCEPTIONS
-#define VULKAN_HPP_USE_STD_EXPECTED
-#include <vulkan/vulkan.hpp>
-#include <vulkan/vulkan_raii.hpp>
-
-#define GLFW_INCLUDE_VULKAN
-#include <GLFW/glfw3.h>
-
 #include "../lib/load/load.hpp"
 #include "apputils.hpp"
+#include "uniforms.hpp"
 #include "vertex.hpp"
 #include "vkutils.hpp"
 
@@ -127,6 +132,8 @@ private:
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_image_views(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
+        { return create_descriptor_set_layout(); })
+      .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_graphics_pipeline(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_command_pool(); })
@@ -134,6 +141,12 @@ private:
         { return create_vertex_buffer(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_index_buffer(); })
+      .and_then([ this ] -> std::expected<void, vkutils::error>
+        { return create_uniform_buffers(); })
+      .and_then([ this ] -> std::expected<void, vkutils::error>
+        { return create_descriptor_pool(); })
+      .and_then([ this ] -> std::expected<void, vkutils::error>
+        { return create_descriptor_sets(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_command_buffers(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
@@ -354,14 +367,34 @@ private:
       image_view_info.image = image;
       auto image_view =
         vkutils::locate(device_.createImageView(image_view_info));
-      if (!image_view.has_value()) [[unlikely]]
+      if (!image_view) [[unlikely]]
       {
         return std::unexpected { image_view.error() };
       }
-      swapchain_image_views_.emplace_back(std::move(image_view.value()));
+      swapchain_image_views_.emplace_back(std::move(*image_view));
     }
 
     return {};
+  }
+
+  constexpr auto
+  create_descriptor_set_layout() -> std::expected<void, vkutils::error>
+  {
+    vk::DescriptorSetLayoutBinding ubo_layout_binding {
+      .binding = 0,
+      .descriptorType = vk::DescriptorType::eUniformBuffer,
+      .descriptorCount = 1,
+      .stageFlags = vk::ShaderStageFlagBits::eVertex,
+      .pImmutableSamplers = nullptr,
+    };
+
+    vk::DescriptorSetLayoutCreateInfo layout_info {
+      .bindingCount = 1,
+      .pBindings = &ubo_layout_binding,
+    };
+
+    return vkutils::locate(device_.createDescriptorSetLayout(layout_info))
+      .transform(vkutils::store_into(descriptor_set_layout_));
   }
 
   // TODO(Konrad): refactor - too long
@@ -423,7 +456,7 @@ private:
       .rasterizerDiscardEnable = vk::False,
       .polygonMode = vk::PolygonMode::eFill,
       .cullMode = vk::CullModeFlagBits::eBack,
-      .frontFace = vk::FrontFace::eClockwise,
+      .frontFace = vk::FrontFace::eCounterClockwise,
       .depthBiasEnable = vk::False,
       .depthBiasSlopeFactor = 1.0F,
       .lineWidth = 1.0F,
@@ -460,7 +493,8 @@ private:
     };
 
     vk::PipelineLayoutCreateInfo pipeline_layout_info {
-      .setLayoutCount = 0,
+      .setLayoutCount = 1,
+      .pSetLayouts = &*descriptor_set_layout_,
       .pushConstantRangeCount = 0,
     };
 
@@ -584,6 +618,107 @@ private:
   }
 
   constexpr auto
+  create_uniform_buffers() -> std::expected<void, vkutils::error>
+  {
+    uniform_buffers_.clear();
+    uniform_buffers_memory_.clear();
+    uniform_buffers_mapped_.clear();
+
+    for (auto i : std::views::iota(0, max_frames_in_flight))
+    {
+      const auto si = static_cast<std::size_t>(i);
+      vk::DeviceSize buffer_size = sizeof(uniform_buffer_object);
+      vk::raii::Buffer buffer { nullptr };
+      vk::raii::DeviceMemory buffer_memory { nullptr };
+
+      auto result =
+        create_buffer(buffer_size, vk::BufferUsageFlagBits::eUniformBuffer,
+          vk::MemoryPropertyFlagBits::eHostVisible |
+            vk::MemoryPropertyFlagBits::eHostCoherent,
+          buffer, buffer_memory)
+          .and_then(
+            [ &, this ]() noexcept -> std::expected<void, vkutils::error>
+            {
+              uniform_buffers_.emplace_back(std::move(buffer));
+              uniform_buffers_memory_.emplace_back(std::move(buffer_memory));
+              const auto mapped =
+                uniform_buffers_memory_[ si ].mapMemory(0, buffer_size);
+              if (!mapped) [[unlikely]]
+              {
+                return std::unexpected {
+                  vkutils::error {
+                    .reason = mapped.error(),
+                  },
+                };
+              }
+              uniform_buffers_mapped_.emplace_back(*mapped);
+              return {};
+            });
+
+      if (!result) [[unlikely]] { return result; }
+    }
+
+    return {};
+  }
+
+  constexpr auto
+  create_descriptor_pool() -> std::expected<void, vkutils::error>
+  {
+    vk::DescriptorPoolSize pool_size {
+      .type = vk::DescriptorType::eUniformBuffer,
+      .descriptorCount = max_frames_in_flight,
+    };
+
+    vk::DescriptorPoolCreateInfo pool_info {
+      .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
+      .maxSets = max_frames_in_flight,
+      .poolSizeCount = 1,
+      .pPoolSizes = &pool_size,
+    };
+
+    return vkutils::locate(device_.createDescriptorPool(pool_info))
+      .transform(vkutils::store_into(descriptor_pool_));
+  }
+
+  constexpr auto
+  create_descriptor_sets() -> std::expected<void, vkutils::error>
+  {
+    std::vector<vk::DescriptorSetLayout> layouts(
+      max_frames_in_flight, *descriptor_set_layout_);
+    vk::DescriptorSetAllocateInfo allocate_info {
+      .descriptorPool = descriptor_pool_,
+      .descriptorSetCount = static_cast<std::uint32_t>(layouts.size()),
+      .pSetLayouts = layouts.data(),
+    };
+
+    descriptor_sets_.clear();
+    return vkutils::locate(device_.allocateDescriptorSets(allocate_info))
+      .transform(vkutils::store_into(descriptor_sets_))
+      .transform(
+        [ this ]() -> void
+        {
+          for (auto i : std::views::iota(
+                 0UZ, static_cast<std::size_t>(max_frames_in_flight)))
+          {
+            vk::DescriptorBufferInfo buffer_info {
+              .buffer = uniform_buffers_[ i ],
+              .offset = 0,
+              .range = sizeof(uniform_buffer_object),
+            };
+            vk::WriteDescriptorSet descriptor_write {
+              .dstSet = descriptor_sets_[ i ],
+              .dstBinding = 0,
+              .dstArrayElement = 0,
+              .descriptorCount = 1,
+              .descriptorType = vk::DescriptorType::eUniformBuffer,
+              .pBufferInfo = &buffer_info,
+            };
+            device_.updateDescriptorSets(descriptor_write, {});
+          }
+        });
+  }
+
+  constexpr auto
   create_command_buffers() -> std::expected<void, vkutils::error>
   {
     vk::CommandBufferAllocateInfo command_buffer_allocate_info {
@@ -650,6 +785,8 @@ private:
         .offset { .x = 0, .y = 0 },
         .extent = swapchain_extent_,
       });
+    command_buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
+      pipeline_layout_, 0, *descriptor_sets_[ frame_index_ ], nullptr);
     command_buffer.drawIndexed(example_indices.size(), 1, 0, 0, 0);
     command_buffer.endRendering();
 
@@ -726,6 +863,8 @@ private:
         },
       };
     }
+
+    update_uniform_buffer(frame_index_);
 
     return vkutils::locate(
       device_.resetFences(*in_flight_fences_[ frame_index_ ]))
@@ -1338,6 +1477,31 @@ private:
         });
   }
 
+  constexpr void
+  update_uniform_buffer(std::uint32_t current_image)
+  {
+    static auto start_time = std::chrono::high_resolution_clock::now();
+    auto current_time = std::chrono::high_resolution_clock::now();
+    auto time = std::chrono::duration<float, std::chrono::seconds::period>(
+      current_time - start_time)
+                  .count();
+
+    uniform_buffer_object ubo {};
+    ubo.model = glm::rotate(
+      glm::mat4(1.0F), time * glm::radians(90.0F), glm::vec3(0.0F, 0.0F, 1.0F));
+    ubo.view = glm::lookAt(glm::vec3(2.0F, 2.0F, 2.0F),
+      glm::vec3(0.0F, 0.0F, 0.0F), glm::vec3(0.0F, 0.0F, 1.0F));
+    ubo.proj = glm::perspective(glm::radians(45.0F),
+      static_cast<float>(swapchain_extent_.width) /
+        static_cast<float>(swapchain_extent_.height),
+      0.1F, 10.0F);
+
+    // Invert Y axis (OpenGL has it inverted)
+    ubo.proj[ 1 ][ 1 ] *= -1;
+
+    std::memcpy(uniform_buffers_mapped_[ current_image ], &ubo, sizeof(ubo));
+  }
+
 private:
   // 8 bytes alignment
   GLFWwindow* window_ {};
@@ -1352,13 +1516,20 @@ private:
   vk::raii::SwapchainKHR swapchain_ { nullptr };
   std::vector<vk::Image> swapchain_images_;
   std::vector<vk::raii::ImageView> swapchain_image_views_;
+  vk::raii::DescriptorSetLayout descriptor_set_layout_ { nullptr };
   vk::raii::PipelineLayout pipeline_layout_ { nullptr };
   vk::raii::Pipeline graphics_pipeline_ { nullptr };
   vk::raii::CommandPool command_pool_ { nullptr };
+  vk::raii::DescriptorPool descriptor_pool_ { nullptr };
+  std::vector<vk::raii::DescriptorSet> descriptor_sets_;
   vk::raii::Buffer vertex_buffer_ { nullptr };
   vk::raii::DeviceMemory vertex_buffer_memory_ { nullptr };
   vk::raii::Buffer index_buffer_ { nullptr };
   vk::raii::DeviceMemory index_buffer_memory_ { nullptr };
+
+  std::vector<vk::raii::Buffer> uniform_buffers_;
+  std::vector<vk::raii::DeviceMemory> uniform_buffers_memory_;
+  std::vector<void*> uniform_buffers_mapped_;
 
   std::vector<vk::raii::CommandBuffer> command_buffers_;
   std::vector<vk::raii::Semaphore> presentation_complete_semaphores_;
