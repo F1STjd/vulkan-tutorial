@@ -17,7 +17,9 @@ enum class error : std::uint8_t
   search_for_memory_type_failed,
   wait_for_fences_failed,
   next_image_acquire_failed,
-  queue_present_failed
+  queue_present_failed,
+  unsupported_layout_transition,
+  stb_load_failed
 };
 
 constexpr auto
@@ -47,6 +49,10 @@ to_string(error e) -> std::string_view
     return "failed to acquire next image";
   case error::queue_present_failed:
     return "queue failed to present image";
+  case error::unsupported_layout_transition:
+    return "failed to transition image layout due to unsupported layout";
+  case error::stb_load_failed:
+    return "failed to load image from a file";
   }
   return "unknown error";
 }

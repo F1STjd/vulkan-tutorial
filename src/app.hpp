@@ -13,6 +13,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <stb_image.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -137,6 +139,8 @@ private:
         { return create_graphics_pipeline(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_command_pool(); })
+      .and_then([ this ] -> std::expected<void, vkutils::error>
+        { return create_texture_image(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_vertex_buffer(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
@@ -539,6 +543,72 @@ private:
     };
     return vkutils::locate(device_.createCommandPool(command_pool_info))
       .transform(vkutils::store_into(command_pool_));
+  }
+
+  // maybe some struct of an image would be better
+  constexpr auto
+  create_texture_image() -> std::expected<void, vkutils::error>
+  {
+    std::int32_t texture_width {};
+    std::int32_t texture_height {};
+    std::int32_t texture_channels {};
+
+    auto* pixels = stbi_load(TEXTURES_DIR "/texture.jpg", &texture_width,
+      &texture_height, &texture_channels, STBI_rgb_alpha);
+    const vk::DeviceSize image_size { static_cast<std::size_t>(texture_width) *
+      static_cast<std::size_t>(texture_height) * 4UZ };
+    const auto u_texture_width = static_cast<std::uint32_t>(texture_width);
+    const auto u_texture_height = static_cast<std::uint32_t>(texture_height);
+
+    if (pixels == nullptr)
+    {
+      return std::unexpected {
+        vkutils::error { .reason = apputils::error::stb_load_failed },
+      };
+    }
+
+    vk::raii::Buffer staging_buffer { nullptr };
+    vk::raii::DeviceMemory staging_buffer_memory { nullptr };
+    return create_buffer(image_size, vk::BufferUsageFlagBits::eTransferSrc,
+      vk::MemoryPropertyFlagBits::eHostVisible |
+        vk::MemoryPropertyFlagBits::eHostCoherent,
+      staging_buffer, staging_buffer_memory)
+      .and_then(
+        [ & ]() noexcept -> std::expected<void, vkutils::error>
+        {
+          return map_memory(image_size, staging_buffer_memory,
+            std::span { pixels, image_size });
+        })
+      .transform([ & ]() -> void { stbi_image_free(pixels); })
+      .and_then(
+        [ &, this ]() -> std::expected<void, vkutils::error>
+        {
+          return create_image(u_texture_width, u_texture_height,
+            vk::Format::eR8G8B8A8Srgb, vk::ImageTiling::eOptimal,
+            vk::ImageUsageFlagBits::eTransferDst |
+              vk::ImageUsageFlagBits::eSampled,
+            vk::MemoryPropertyFlagBits::eDeviceLocal, texture_image_,
+            texture_image_memory_);
+        })
+      .and_then(
+        [ this ]() noexcept -> std::expected<void, vkutils::error>
+        {
+          return transition_image_layout(texture_image_,
+            vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+        })
+      .and_then(
+        [ &, this ]() noexcept -> std::expected<void, vkutils::error>
+        {
+          return copy_buffer_to_image(
+            staging_buffer, texture_image_, u_texture_width, u_texture_height);
+        })
+      .and_then(
+        [ this ]() noexcept -> std::expected<void, vkutils::error>
+        {
+          return transition_image_layout(texture_image_,
+            vk::ImageLayout::eTransferDstOptimal,
+            vk::ImageLayout::eShaderReadOnlyOptimal);
+        });
   }
 
   // https://docs.vulkan.org/tutorial/latest/04_Vertex_buffers/03_Index_buffer.html
@@ -1306,7 +1376,7 @@ private:
     return vkutils::locate(device_.createShaderModule(info));
   }
 
-  void
+  constexpr void
   transition_image_layout(std::uint32_t image_index, vk::ImageLayout old_layout,
     vk::ImageLayout new_layout, vk::AccessFlags2 src_access_mask,
     vk::AccessFlags2 dst_access_mask,
@@ -1339,6 +1409,58 @@ private:
     };
 
     command_buffers_[ frame_index_ ].pipelineBarrier2(dependency_info);
+  }
+
+  constexpr auto
+  transition_image_layout(const vk::raii::Image& image,
+    vk::ImageLayout old_layout, vk::ImageLayout new_layout)
+    -> std::expected<void, vkutils::error>
+  {
+    return begin_single_time_commands().and_then(
+      [ &, this ](vk::raii::CommandBuffer command_copy_buffer) noexcept
+        -> std::expected<void, vkutils::error>
+      {
+        vk::ImageMemoryBarrier barrier {
+          .oldLayout = old_layout,
+          .newLayout = new_layout,
+          .image = image,
+          .subresourceRange {
+            .aspectMask = vk::ImageAspectFlagBits::eColor,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+          },
+        };
+
+        vk::PipelineStageFlags source_stage {};
+        vk::PipelineStageFlags destination_stage {};
+
+        if (old_layout == vk::ImageLayout::eUndefined &&
+          new_layout == vk::ImageLayout::eTransferDstOptimal)
+        {
+          barrier.srcAccessMask = {};
+          barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+          source_stage = vk::PipelineStageFlagBits::eTopOfPipe;
+          destination_stage = vk::PipelineStageFlagBits::eTransfer;
+        }
+        else if (old_layout == vk::ImageLayout::eTransferDstOptimal &&
+          new_layout == vk::ImageLayout::eShaderReadOnlyOptimal)
+        {
+
+          barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+          barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+          source_stage = vk::PipelineStageFlagBits::eTransfer;
+          destination_stage = vk::PipelineStageFlagBits::eFragmentShader;
+        }
+        else
+        {}
+
+        command_copy_buffer.pipelineBarrier(
+          source_stage, destination_stage, {}, {}, nullptr, barrier);
+
+        return end_single_time_commands(command_copy_buffer);
+      });
   }
 
   constexpr auto
@@ -1433,48 +1555,23 @@ private:
     vk::raii::Buffer& destination_buffer, vk::DeviceSize size)
     -> std::expected<void, vkutils::error>
   {
-    vk::CommandBufferAllocateInfo allocate_info {
-      .commandPool = command_pool_,
-      .level = vk::CommandBufferLevel::ePrimary,
-      .commandBufferCount = 1,
-    };
-
-    return vkutils::locate(device_.allocateCommandBuffers(allocate_info))
-      .and_then(
-        [ &, this ](
-          auto&& buffers) noexcept -> std::expected<void, vkutils::error>
+    return begin_single_time_commands()
+      .transform(
+        [ & ](vk::raii::CommandBuffer command_copy_buffer) noexcept
+          -> vk::raii::CommandBuffer
         {
-          auto& command_copy_buffer = buffers.front();
-          return vkutils::locate(
-            command_copy_buffer.begin(vk::CommandBufferBeginInfo {
-              .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit,
-            }))
-            .transform(
-              [ & ]() noexcept -> void
-              {
-                command_copy_buffer.copyBuffer(*source_buffer,
-                  *destination_buffer,
-                  vk::BufferCopy {
-                    .srcOffset = 0,
-                    .dstOffset = 0,
-                    .size = size,
-                  });
-              })
-            .and_then([ & ]() noexcept -> std::expected<void, vkutils::error>
-              { return vkutils::locate(command_copy_buffer.end()); })
-            .and_then(
-              [ &, this ]() noexcept -> std::expected<void, vkutils::error>
-              {
-                return vkutils::locate(graphics_queue_.submit(
-                  vk::SubmitInfo {
-                    .commandBufferCount = 1,
-                    .pCommandBuffers = &*command_copy_buffer,
-                  },
-                  nullptr));
-              })
-            .and_then([ this ]() noexcept -> std::expected<void, vkutils::error>
-              { return vkutils::locate(graphics_queue_.waitIdle()); });
-        });
+          command_copy_buffer.copyBuffer(source_buffer, destination_buffer,
+            vk::BufferCopy {
+              .srcOffset = 0,
+              .dstOffset = 0,
+              .size = size,
+            });
+
+          return command_copy_buffer;
+        })
+      .and_then([ this ](vk::raii::CommandBuffer command_copy_buffer) noexcept
+                  -> std::expected<void, vkutils::error>
+        { return end_single_time_commands(command_copy_buffer); });
   }
 
   constexpr void
@@ -1500,6 +1597,120 @@ private:
     ubo.proj[ 1 ][ 1 ] *= -1;
 
     std::memcpy(uniform_buffers_mapped_[ current_image ], &ubo, sizeof(ubo));
+  }
+
+  constexpr auto
+  create_image(std::uint32_t width, std::uint32_t height, vk::Format format,
+    vk::ImageTiling tiling, vk::ImageUsageFlags usage,
+    vk::MemoryPropertyFlags properties, vk::raii::Image& image,
+    vk::raii::DeviceMemory& image_memory) -> std::expected<void, vkutils::error>
+  {
+    vk::ImageCreateInfo image_info {
+      .imageType = vk::ImageType::e2D,
+      .format = format,
+      .extent {
+        .width = width,
+        .height = height,
+        .depth = 1,
+      },
+      .mipLevels = 1,
+      .arrayLayers = 1,
+      .samples = vk::SampleCountFlagBits::e1,
+      .tiling = tiling,
+      .usage = usage,
+      .sharingMode = vk::SharingMode::eExclusive,
+    };
+
+    return vkutils::locate(device_.createImage(image_info))
+      .transform(vkutils::store_into(image))
+      .and_then(
+        [ & ]() noexcept -> std::expected<void, vkutils::error>
+        {
+          vk::MemoryRequirements requirements = image.getMemoryRequirements();
+          return allocate_memory(image_memory, requirements, properties);
+        })
+      .and_then([ & ]() noexcept -> std::expected<void, vkutils::error>
+        { return vkutils::locate(image.bindMemory(*image_memory, 0)); });
+  }
+
+  constexpr auto
+  begin_single_time_commands()
+    -> std::expected<vk::raii::CommandBuffer, vkutils::error>
+  {
+    vk::CommandBufferAllocateInfo allocate_info {
+      .commandPool = command_pool_,
+      .level = vk::CommandBufferLevel::ePrimary,
+      .commandBufferCount = 1,
+    };
+
+    return vkutils::locate(device_.allocateCommandBuffers(allocate_info))
+      .and_then(
+        [](auto&& buffers)
+          -> std::expected<vk::raii::CommandBuffer, vkutils::error>
+        {
+          auto command_buffer = std::move(buffers.front());
+          return vkutils::locate(
+            command_buffer.begin(
+              { .flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit }))
+            .transform([ & ]() -> vk::raii::CommandBuffer
+              { return std::move(command_buffer); });
+        });
+  }
+
+  constexpr auto
+  end_single_time_commands(vk::raii::CommandBuffer& command_buffer)
+    -> std::expected<void, vkutils::error>
+  {
+    return vkutils::locate(command_buffer.end())
+      .and_then(
+        [ &, this ]() noexcept -> std::expected<void, vkutils::error>
+        {
+          return vkutils::locate(graphics_queue_.submit(
+            vk::SubmitInfo {
+              .commandBufferCount = 1,
+              .pCommandBuffers = &*command_buffer,
+            },
+            nullptr));
+        })
+      .and_then([ this ]() noexcept -> std::expected<void, vkutils::error>
+        { return vkutils::locate(graphics_queue_.waitIdle()); });
+  }
+
+  constexpr auto
+  copy_buffer_to_image(const vk::raii::Buffer& buffer, vk::raii::Image& image,
+    std::uint32_t width, std::uint32_t height)
+    -> std::expected<void, vkutils::error>
+  {
+    return begin_single_time_commands().and_then(
+      [ & ](vk::raii::CommandBuffer command_copy_buffer) noexcept
+        -> std::expected<void, vkutils::error>
+      {
+        vk::BufferImageCopy region {
+          .bufferOffset = 0,
+          .bufferRowLength = 0,
+          .bufferImageHeight = 0,
+          .imageSubresource {
+            .aspectMask = vk::ImageAspectFlagBits::eColor,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+          },
+          .imageOffset {
+            .x = 0,
+            .y = 0,
+            .z = 0,
+          },
+          .imageExtent {
+            .width = width,
+            .height = height,
+            .depth = 1,
+          },
+        };
+        command_copy_buffer.copyBufferToImage(
+          buffer, image, vk::ImageLayout::eTransferDstOptimal, { region });
+
+        return end_single_time_commands(command_copy_buffer);
+      });
   }
 
 private:
@@ -1535,6 +1746,9 @@ private:
   std::vector<vk::raii::Semaphore> presentation_complete_semaphores_;
   std::vector<vk::raii::Semaphore> render_finished_semaphores_;
   std::vector<vk::raii::Fence> in_flight_fences_;
+
+  vk::raii::Image texture_image_ { nullptr };
+  vk::raii::DeviceMemory texture_image_memory_ { nullptr };
 
   // 4 bytes alignment
   vk::SurfaceFormatKHR swapchain_surface_format_ {};

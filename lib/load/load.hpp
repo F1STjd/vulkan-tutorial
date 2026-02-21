@@ -6,8 +6,6 @@
 #include <ios>
 #include <vector>
 
-#include <vulkan/vulkan.hpp>
-
 #include "apputils.hpp"
 
 namespace load

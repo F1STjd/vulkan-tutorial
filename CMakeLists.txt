@@ -62,13 +62,17 @@ find_package(KTX REQUIRED)
 #    "${Vulkan_INCLUDE_DIR}/vulkan/vulkan.cppm"
 #)
 
-add_executable(main main.cpp)
+add_executable(main main.cpp src/stb_image_impl.cpp)
+
+# Suppress all warnings for third-party STB implementation
+set_source_files_properties(src/stb_image_impl.cpp PROPERTIES COMPILE_OPTIONS "-w")
 
 target_compile_definitions(
   main PUBLIC
   VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1
   VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
   SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders"
+  TEXTURES_DIR="${CMAKE_SOURCE_DIR}/textures"
 )
 
 target_link_libraries(
