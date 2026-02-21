@@ -1636,6 +1636,17 @@ private:
         { return vkutils::locate(image.bindMemory(*image_memory, 0)); });
   }
 
+  // https://docs.vulkan.org/tutorial/latest/06_Texture_mapping/00_Images.html
+  // says: All the helper functions that submit commands so far have been set up
+  // to execute synchronously by waiting for the queue to become idle. For
+  // practical applications it is recommended to combine these operations in a
+  // single command buffer and execute them asynchronously for higher
+  // throughput, especially the transitions and copy in the createTextureImage
+  // function. Try to experiment with this by creating a setupCommandBuffer that
+  // the helper functions record commands into, and add a flushSetupCommands to
+  // execute the commands that have been recorded so far. It’s best to do this
+  // after the texture mapping works to check if the texture resources are still
+  // set up correctly.
   constexpr auto
   begin_single_time_commands()
     -> std::expected<vk::raii::CommandBuffer, vkutils::error>
