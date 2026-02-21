@@ -29,6 +29,7 @@ if(tinygltf_FOUND)
   if(NOT TARGET tinygltf::tinygltf)
     add_library(tinygltf::tinygltf INTERFACE IMPORTED)
     set_target_properties(tinygltf::tinygltf PROPERTIES
+      INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${tinygltf_INCLUDE_DIRS}"
       INTERFACE_INCLUDE_DIRECTORIES "${tinygltf_INCLUDE_DIRS}"
     )
     # tinygltf requires these defines when used as header-only

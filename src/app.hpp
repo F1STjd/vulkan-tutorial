@@ -3,8 +3,11 @@
 #define VULKAN_HPP_NO_STRUCT_CONSTRUCTORS 1
 #define VULKAN_HPP_NO_EXCEPTIONS
 #define VULKAN_HPP_USE_STD_EXPECTED
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnull-dereference"
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>
+#pragma GCC diagnostic pop
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
