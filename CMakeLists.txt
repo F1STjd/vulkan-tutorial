@@ -166,6 +166,9 @@ set_target_properties(main PROPERTIES
   CXX_SCAN_FOR_MODULES OFF
 )
 
+# Precompiled header — all third-party and std headers with defines baked in
+target_precompile_headers(main PRIVATE src/pch.hpp)
+
 add_subdirectory(src)
 add_subdirectory(lib)
 add_subdirectory(shaders)
