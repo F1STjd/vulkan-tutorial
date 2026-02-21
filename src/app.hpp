@@ -145,6 +145,10 @@ private:
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_texture_image(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
+        { return create_texture_image_view(); })
+      .and_then([ this ] -> std::expected<void, vkutils::error>
+        { return create_texture_sampler(); })
+      .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_vertex_buffer(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_index_buffer(); })
@@ -285,13 +289,17 @@ private:
     presentation_queue_index_ = *presentation_index;
 
     vk::StructureChain feature_chain {
-      vk::PhysicalDeviceFeatures2 {},
+      vk::PhysicalDeviceFeatures2 {
+        .features {
+          .samplerAnisotropy = vk::True,
+        },
+      },
       vk::PhysicalDeviceVulkan13Features {
-        .synchronization2 = vk::Bool32 { true },
-        .dynamicRendering = vk::Bool32 { true },
+        .synchronization2 = vk::True,
+        .dynamicRendering = vk::True,
       },
       vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT {
-        .extendedDynamicState = vk::Bool32 { true },
+        .extendedDynamicState = vk::True,
       },
     };
 
@@ -353,27 +361,10 @@ private:
   {
     swapchain_image_views_.clear();
 
-    vk::ImageViewCreateInfo image_view_info {
-      .pNext = {},
-      .flags = {},
-      .image = {},
-      .viewType = vk::ImageViewType::e2D,
-      .format = swapchain_surface_format_.format,
-      .components = {},
-      .subresourceRange {
-        .aspectMask = vk::ImageAspectFlagBits::eColor,
-        .baseMipLevel = 0,
-        .levelCount = 1,
-        .baseArrayLayer = 0,
-        .layerCount = 1,
-      },
-    };
-
-    for (const auto& image : swapchain_images_)
+    for (auto& image : swapchain_images_)
     {
-      image_view_info.image = image;
       auto image_view =
-        vkutils::locate(device_.createImageView(image_view_info));
+        create_image_view(image, swapchain_surface_format_.format);
       if (!image_view) [[unlikely]]
       {
         return std::unexpected { image_view.error() };
@@ -382,6 +373,32 @@ private:
     }
 
     return {};
+  }
+
+  constexpr auto
+  create_texture_sampler() -> std::expected<void, vkutils::error>
+  {
+    auto properties = physical_device_.getProperties();
+    vk::SamplerCreateInfo sampler_info {
+      .magFilter = vk::Filter::eLinear,
+      .minFilter = vk::Filter::eLinear,
+      .mipmapMode = vk::SamplerMipmapMode::eNearest,
+      .addressModeU = vk::SamplerAddressMode::eRepeat,
+      .addressModeV = vk::SamplerAddressMode::eRepeat,
+      .addressModeW = vk::SamplerAddressMode::eRepeat,
+      .mipLodBias = 0.0F,
+      .anisotropyEnable = vk::True,
+      .maxAnisotropy = properties.limits.maxSamplerAnisotropy,
+      .compareEnable = vk::False,
+      .compareOp = vk::CompareOp::eAlways,
+      .minLod = 0.0F,
+      .maxLod = 0.0F,
+      .borderColor = vk::BorderColor::eIntOpaqueBlack,
+      .unnormalizedCoordinates = vk::False,
+    };
+
+    return vkutils::locate(device_.createSampler(sampler_info))
+      .transform(vkutils::store_into(texture_sampler_));
   }
 
   constexpr auto
@@ -612,6 +629,13 @@ private:
             vk::ImageLayout::eTransferDstOptimal,
             vk::ImageLayout::eShaderReadOnlyOptimal);
         });
+  }
+
+  constexpr auto
+  create_texture_image_view() -> std::expected<void, vkutils::error>
+  {
+    return create_image_view(texture_image_, vk::Format::eR8G8B8A8Srgb)
+      .transform(vkutils::store_into(texture_image_view_));
   }
 
   // https://docs.vulkan.org/tutorial/latest/04_Vertex_buffers/03_Index_buffer.html
@@ -1150,8 +1174,11 @@ private:
   constexpr auto
   is_device_suitable(const vk::raii::PhysicalDevice& device) -> bool
   {
+    auto supported_features = device.getFeatures();
+
     return has_minimum_api_version(device) &&
-      has_graphics_queue_family(device) && has_required_extensions(device);
+      has_graphics_queue_family(device) && has_required_extensions(device) &&
+      (supported_features.samplerAnisotropy != 0U);
   }
 
   constexpr auto
@@ -1727,6 +1754,26 @@ private:
       });
   }
 
+  constexpr auto
+  create_image_view(vk::Image image, vk::Format format)
+    -> std::expected<vk::raii::ImageView, vkutils::error>
+  {
+    vk::ImageViewCreateInfo view_info {
+      .image = image,
+      .viewType = vk::ImageViewType::e2D,
+      .format = format,
+      .subresourceRange {
+        .aspectMask = vk::ImageAspectFlagBits::eColor,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+      },
+    };
+
+    return vkutils::locate(device_.createImageView(view_info));
+  }
+
 private:
   // 8 bytes alignment
   GLFWwindow* window_ {};
@@ -1763,6 +1810,8 @@ private:
 
   vk::raii::Image texture_image_ { nullptr };
   vk::raii::DeviceMemory texture_image_memory_ { nullptr };
+  vk::raii::ImageView texture_image_view_ { nullptr };
+  vk::raii::Sampler texture_sampler_ { nullptr };
 
   // 4 bytes alignment
   vk::SurfaceFormatKHR swapchain_surface_format_ {};
