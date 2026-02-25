@@ -1,6 +1,6 @@
 struct vertex_shader_input
 {
-  float2 position;
+  float3 position;
   float3 color;
   float2 texture_coordinates;
 };
@@ -23,7 +23,7 @@ struct vertex_shader_output
 vertex_shader_output vertex_main(vertex_shader_input input)
 {
   vertex_shader_output output;
-  output.position = mul(ubo.proj, mul(ubo.view, mul(ubo.model, float4(input.position, 0.0, 1.0))));
+  output.position = mul(ubo.proj, mul(ubo.view, mul(ubo.model, float4(input.position, 1.0))));
   output.color = input.color;
   output.texture_coordinates = input.texture_coordinates;
 
