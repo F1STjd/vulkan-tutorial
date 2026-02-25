@@ -372,17 +372,26 @@ private:
   constexpr auto
   create_descriptor_set_layout() -> std::expected<void, vkutils::error>
   {
-    vk::DescriptorSetLayoutBinding ubo_layout_binding {
-      .binding = 0,
-      .descriptorType = vk::DescriptorType::eUniformBuffer,
-      .descriptorCount = 1,
-      .stageFlags = vk::ShaderStageFlagBits::eVertex,
-      .pImmutableSamplers = nullptr,
+    constexpr std::array bindings {
+      vk::DescriptorSetLayoutBinding {
+        .binding = 0,
+        .descriptorType = vk::DescriptorType::eUniformBuffer,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eVertex,
+        .pImmutableSamplers = nullptr,
+      },
+      vk::DescriptorSetLayoutBinding {
+        .binding = 1,
+        .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+        .descriptorCount = 1,
+        .stageFlags = vk::ShaderStageFlagBits::eFragment,
+        .pImmutableSamplers = nullptr,
+      },
     };
 
     vk::DescriptorSetLayoutCreateInfo layout_info {
-      .bindingCount = 1,
-      .pBindings = &ubo_layout_binding,
+      .bindingCount = bindings.size(),
+      .pBindings = bindings.data(),
     };
 
     return vkutils::locate(device_.createDescriptorSetLayout(layout_info))
@@ -729,16 +738,22 @@ private:
   constexpr auto
   create_descriptor_pool() -> std::expected<void, vkutils::error>
   {
-    vk::DescriptorPoolSize pool_size {
-      .type = vk::DescriptorType::eUniformBuffer,
-      .descriptorCount = max_frames_in_flight,
+    std::array pool_sizes {
+      vk::DescriptorPoolSize {
+        .type = vk::DescriptorType::eUniformBuffer,
+        .descriptorCount = max_frames_in_flight,
+      },
+      vk::DescriptorPoolSize {
+        .type = vk::DescriptorType::eCombinedImageSampler,
+        .descriptorCount = max_frames_in_flight,
+      },
     };
 
     vk::DescriptorPoolCreateInfo pool_info {
       .flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet,
       .maxSets = max_frames_in_flight,
-      .poolSizeCount = 1,
-      .pPoolSizes = &pool_size,
+      .poolSizeCount = pool_sizes.size(),
+      .pPoolSizes = pool_sizes.data(),
     };
 
     return vkutils::locate(device_.createDescriptorPool(pool_info))
@@ -770,15 +785,30 @@ private:
               .offset = 0,
               .range = sizeof(uniform_buffer_object),
             };
-            vk::WriteDescriptorSet descriptor_write {
-              .dstSet = descriptor_sets_[ i ],
-              .dstBinding = 0,
-              .dstArrayElement = 0,
-              .descriptorCount = 1,
-              .descriptorType = vk::DescriptorType::eUniformBuffer,
-              .pBufferInfo = &buffer_info,
+            vk::DescriptorImageInfo image_info {
+              .sampler = texture_sampler_,
+              .imageView = texture_image_view_,
+              .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
             };
-            device_.updateDescriptorSets(descriptor_write, {});
+            std::array descriptor_writes {
+              vk::WriteDescriptorSet {
+                .dstSet = descriptor_sets_[ i ],
+                .dstBinding = 0,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eUniformBuffer,
+                .pBufferInfo = &buffer_info,
+              },
+              vk::WriteDescriptorSet {
+                .dstSet = descriptor_sets_[ i ],
+                .dstBinding = 1,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eCombinedImageSampler,
+                .pImageInfo = &image_info,
+              },
+            };
+            device_.updateDescriptorSets(descriptor_writes, {});
           }
         });
   }
