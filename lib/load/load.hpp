@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <ios>
+#include <unordered_map>
 #include <vector>
 
 #include "apputils.hpp"
@@ -51,6 +52,8 @@ model_obj(std::vector<vertex>& vertices, std::vector<std::uint32_t>& indices,
     return std::unexpected { apputils::error::tinyobj_load_failed };
   }
 
+  std::unordered_map<vertex, std::uint32_t> unique_vertices;
+
   // TODO(Konrad): any algorith that replaces it?
   for (const auto& shape : shapes)
   {
@@ -79,8 +82,12 @@ model_obj(std::vector<vertex>& vertices, std::vector<std::uint32_t>& indices,
 
       v.color = { 1.0F, 1.0F, 1.0F };
 
-      vertices.push_back(v);
-      indices.push_back(static_cast<std::uint32_t>(indices.size()));
+      if (!unique_vertices.contains(v))
+      {
+        unique_vertices[ v ] = static_cast<std::uint32_t>(vertices.size());
+        vertices.push_back(v);
+      }
+      indices.push_back(unique_vertices[ v ]);
     }
   }
 

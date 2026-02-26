@@ -945,7 +945,8 @@ private:
       });
     command_buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
       pipeline_layout_, 0, *descriptor_sets_[ frame_index_ ], nullptr);
-    command_buffer.drawIndexed(indices_.size(), 1, 0, 0, 0);
+    command_buffer.drawIndexed(
+      static_cast<std::uint32_t>(indices_.size()), 1, 0, 0, 0);
     command_buffer.endRendering();
 
     transition_image_layout(swapchain_images_[ image_index ],

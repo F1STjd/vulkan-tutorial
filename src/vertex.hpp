@@ -12,6 +12,9 @@ struct vertex
   glm::vec3 color;
   glm::vec2 texture_coordinates;
 
+  constexpr auto
+  operator==(const vertex& other) const -> bool = default;
+
   static consteval auto
   get_binding_description() -> vk::VertexInputBindingDescription
   {
@@ -48,3 +51,19 @@ struct vertex
     };
   }
 };
+
+namespace std
+{
+template<>
+struct hash<vertex>
+{
+  constexpr auto
+  operator()(const vertex& v) const noexcept -> size_t
+  {
+    return //
+      ((hash<glm::vec3>()(v.position) ^ (hash<glm::vec3>()(v.color) << 1)) >>
+        1) ^
+      (hash<glm::vec2>()(v.texture_coordinates) << 1);
+  }
+};
+} // namespace std
