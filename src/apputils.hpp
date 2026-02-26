@@ -20,7 +20,8 @@ enum class error : std::uint8_t
   queue_present_failed,
   unsupported_layout_transition,
   search_for_supported_format_failed,
-  stb_load_failed
+  stb_load_failed,
+  tinyobj_load_failed
 };
 
 constexpr auto
@@ -56,6 +57,8 @@ to_string(error e) -> std::string_view
     return "Failed to find supported format";
   case error::stb_load_failed:
     return "failed to load image from a file";
+  case error::tinyobj_load_failed:
+    return "failed to load model from an obj file";
   }
   return "unknown error";
 }

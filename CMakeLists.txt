@@ -73,6 +73,7 @@ target_compile_definitions(
   VULKAN_HPP_NO_STRUCT_CONSTRUCTORS=1
   SHADER_DIR="${CMAKE_SOURCE_DIR}/shaders"
   TEXTURES_DIR="${CMAKE_SOURCE_DIR}/textures"
+  MODELS_DIR="${CMAKE_SOURCE_DIR}/models"
 )
 
 target_link_libraries(

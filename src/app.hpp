@@ -8,6 +8,10 @@
 
 static constexpr std::uint32_t initial_width { 800 };
 static constexpr std::uint32_t initial_height { 600 };
+static const std::string model_path { MODELS_DIR "/viking_room.obj" };
+static const std::string texture_path {
+  TEXTURES_DIR "/viking_room.png",
+};
 
 static constexpr std::int32_t max_frames_in_flight { 2 };
 
@@ -118,6 +122,8 @@ private:
         { return create_texture_image_view(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_texture_sampler(); })
+      .and_then([ this ] -> std::expected<void, vkutils::error>
+        { return load_model(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_vertex_buffer(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
@@ -585,7 +591,7 @@ private:
     std::int32_t texture_height {};
     std::int32_t texture_channels {};
 
-    auto* pixels = stbi_load(TEXTURES_DIR "/texture.jpg", &texture_width,
+    auto* pixels = stbi_load(texture_path.c_str(), &texture_width,
       &texture_height, &texture_channels, STBI_rgb_alpha);
     const vk::DeviceSize image_size { static_cast<std::size_t>(texture_width) *
       static_cast<std::size_t>(texture_height) * 4UZ };
@@ -651,6 +657,13 @@ private:
       .transform(vkutils::store_into(texture_image_view_));
   }
 
+  constexpr auto
+  load_model() -> std::expected<void, vkutils::error>
+  {
+    return vkutils::locate(
+      load::model_obj(vertices_, indices_, model_path.c_str()));
+  }
+
   // https://docs.vulkan.org/tutorial/latest/04_Vertex_buffers/03_Index_buffer.html
   // says: The previous chapter already mentioned that you should allocate
   // multiple resources like buffers from a single memory allocation, but in
@@ -666,8 +679,7 @@ private:
   constexpr auto
   create_vertex_buffer() -> std::expected<void, vkutils::error>
   {
-    constexpr vk::DeviceSize buffer_size =
-      sizeof(vertex) * example_vertices.size();
+    const vk::DeviceSize buffer_size = sizeof(vertex) * vertices_.size();
 
     vk::raii::Buffer staging_buffer { nullptr };
     vk::raii::DeviceMemory staging_buffer_memory { nullptr };
@@ -676,14 +688,10 @@ private:
       vk::MemoryPropertyFlagBits::eHostVisible |
         vk::MemoryPropertyFlagBits::eHostCoherent,
       staging_buffer, staging_buffer_memory)
+      .and_then([ & ]() noexcept -> std::expected<void, vkutils::error>
+        { return map_memory(buffer_size, staging_buffer_memory, vertices_); })
       .and_then(
-        [ & ]() noexcept -> std::expected<void, vkutils::error>
-        {
-          return map_memory(
-            buffer_size, staging_buffer_memory, example_vertices);
-        })
-      .and_then(
-        [ this ]() noexcept -> std::expected<void, vkutils::error>
+        [ &, this ]() noexcept -> std::expected<void, vkutils::error>
         {
           return create_buffer(buffer_size,
             vk::BufferUsageFlagBits::eVertexBuffer |
@@ -698,8 +706,7 @@ private:
   constexpr auto
   create_index_buffer() -> std::expected<void, vkutils::error>
   {
-    constexpr vk::DeviceSize buffer_size =
-      sizeof(example_indices[ 0 ]) * example_indices.size();
+    const vk::DeviceSize buffer_size = sizeof(indices_[ 0 ]) * indices_.size();
 
     vk::raii::Buffer staging_buffer { nullptr };
     vk::raii::DeviceMemory staging_buffer_memory { nullptr };
@@ -708,14 +715,10 @@ private:
       vk::MemoryPropertyFlagBits::eHostVisible |
         vk::MemoryPropertyFlagBits::eHostCoherent,
       staging_buffer, staging_buffer_memory)
+      .and_then([ & ]() noexcept -> std::expected<void, vkutils::error>
+        { return map_memory(buffer_size, staging_buffer_memory, indices_); })
       .and_then(
-        [ & ]() noexcept -> std::expected<void, vkutils::error>
-        {
-          return map_memory(
-            buffer_size, staging_buffer_memory, example_indices);
-        })
-      .and_then(
-        [ this ]() noexcept -> std::expected<void, vkutils::error>
+        [ &, this ]() noexcept -> std::expected<void, vkutils::error>
         {
           return create_buffer(buffer_size,
             vk::BufferUsageFlagBits::eIndexBuffer |
@@ -942,7 +945,7 @@ private:
       });
     command_buffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics,
       pipeline_layout_, 0, *descriptor_sets_[ frame_index_ ], nullptr);
-    command_buffer.drawIndexed(example_indices.size(), 1, 0, 0, 0);
+    command_buffer.drawIndexed(indices_.size(), 1, 0, 0, 0);
     command_buffer.endRendering();
 
     transition_image_layout(swapchain_images_[ image_index ],
@@ -1903,6 +1906,9 @@ private:
   vk::raii::CommandPool command_pool_ { nullptr };
   vk::raii::DescriptorPool descriptor_pool_ { nullptr };
   std::vector<vk::raii::DescriptorSet> descriptor_sets_;
+
+  std::vector<vertex> vertices_;
+  std::vector<std::uint32_t> indices_;
   vk::raii::Buffer vertex_buffer_ { nullptr };
   vk::raii::DeviceMemory vertex_buffer_memory_ { nullptr };
   vk::raii::Buffer index_buffer_ { nullptr };
