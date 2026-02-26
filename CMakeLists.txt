@@ -62,7 +62,7 @@ find_package(KTX REQUIRED)
 #    "${Vulkan_INCLUDE_DIR}/vulkan/vulkan.cppm"
 #)
 
-add_executable(main main.cpp src/stb_image_impl.cpp)
+add_executable(main main.cpp src/implementations.cpp)
 
 # Suppress all warnings for third-party STB implementation
 set_source_files_properties(src/stb_image_impl.cpp PROPERTIES COMPILE_OPTIONS "-w")

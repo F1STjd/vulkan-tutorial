@@ -9,7 +9,6 @@
 #pragma GCC diagnostic ignored "-Wnull-dereference"
 #include <vulkan/vulkan.hpp>
 #include <vulkan/vulkan_raii.hpp>
-#pragma GCC diagnostic pop
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -20,6 +19,9 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <stb_image.h>
+
+#include <tiny_obj_loader.h>
+#pragma GCC diagnostic pop
 
 #include <algorithm>
 #include <chrono>
