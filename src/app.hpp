@@ -270,6 +270,7 @@ private:
     vk::StructureChain feature_chain {
       vk::PhysicalDeviceFeatures2 {
         .features {
+          .sampleRateShading = vk::True,
           .samplerAnisotropy = vk::True,
         },
       },
@@ -476,7 +477,8 @@ private:
 
     vk::PipelineMultisampleStateCreateInfo multisampling_info {
       .rasterizationSamples = msaa_samples_,
-      .sampleShadingEnable = vk::False,
+      .sampleShadingEnable = vk::True,
+      .minSampleShading = 0.2F,
     };
 
     vk::PipelineDepthStencilStateCreateInfo depth_stencil_info {
