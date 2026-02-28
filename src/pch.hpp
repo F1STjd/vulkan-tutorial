@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <expected>
 #include <format>
