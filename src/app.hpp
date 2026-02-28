@@ -113,6 +113,8 @@ private:
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_command_pool(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
+        { return create_color_resources(); })
+      .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_depth_resources(); })
       .and_then([ this ] -> std::expected<void, vkutils::error>
         { return create_graphics_pipeline(); })
@@ -233,6 +235,7 @@ private:
             if (is_device_suitable(device))
             {
               physical_device_ = device;
+              msaa_samples_ = get_max_usable_sample_count();
               return {};
             }
           }
@@ -472,7 +475,7 @@ private:
     };
 
     vk::PipelineMultisampleStateCreateInfo multisampling_info {
-      .rasterizationSamples = vk::SampleCountFlagBits::e1,
+      .rasterizationSamples = msaa_samples_,
       .sampleShadingEnable = vk::False,
     };
 
@@ -561,6 +564,27 @@ private:
   }
 
   constexpr auto
+  create_color_resources() -> std::expected<void, vkutils::error>
+  {
+    vk::Format color_format = swapchain_surface_format_.format;
+
+    return create_image(swapchain_extent_.width, swapchain_extent_.height, 1,
+      msaa_samples_, color_format, vk::ImageTiling::eOptimal,
+      vk::ImageUsageFlagBits::eTransientAttachment |
+        vk::ImageUsageFlagBits::eColorAttachment,
+      vk::MemoryPropertyFlagBits::eDeviceLocal, color_image_,
+      color_image_memory_)
+      .and_then(
+        [ &, this ]() noexcept
+          -> std::expected<vk::raii::ImageView, vkutils::error>
+        {
+          return create_image_view(
+            color_image_, color_format, vk::ImageAspectFlagBits::eColor, 1);
+        })
+      .transform(vkutils::store_into(color_image_view_));
+  }
+
+  constexpr auto
   create_depth_resources() -> std::expected<void, vkutils::error>
   {
     return find_depth_format()
@@ -569,7 +593,7 @@ private:
         [ &, this ]() noexcept -> std::expected<void, vkutils::error>
         {
           return create_image(swapchain_extent_.width, swapchain_extent_.height,
-            1U, depth_format_, vk::ImageTiling::eOptimal,
+            1U, msaa_samples_, depth_format_, vk::ImageTiling::eOptimal,
             vk::ImageUsageFlagBits::eDepthStencilAttachment,
             vk::MemoryPropertyFlagBits::eDeviceLocal, depth_image_,
             depth_image_memory_);
@@ -626,7 +650,8 @@ private:
         [ &, this ]() -> std::expected<void, vkutils::error>
         {
           return create_image(u_texture_width, u_texture_height, mip_levels_,
-            vk::Format::eR8G8B8A8Srgb, vk::ImageTiling::eOptimal,
+            vk::SampleCountFlagBits::e1, vk::Format::eR8G8B8A8Srgb,
+            vk::ImageTiling::eOptimal,
             vk::ImageUsageFlagBits::eTransferSrc |
               vk::ImageUsageFlagBits::eTransferDst |
               vk::ImageUsageFlagBits::eSampled,
@@ -888,6 +913,14 @@ private:
       vk::PipelineStageFlagBits2::eColorAttachmentOutput,
       vk::ImageAspectFlagBits::eColor);
 
+    transition_image_layout(*color_image_, vk::ImageLayout::eUndefined,
+      vk::ImageLayout::eColorAttachmentOptimal,
+      vk::AccessFlagBits2::eColorAttachmentWrite,
+      vk::AccessFlagBits2::eColorAttachmentWrite,
+      vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+      vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+      vk::ImageAspectFlagBits::eColor);
+
     transition_image_layout(*depth_image_, vk::ImageLayout::eUndefined,
       vk::ImageLayout::eDepthAttachmentOptimal,
       vk::AccessFlagBits2::eDepthStencilAttachmentWrite,
@@ -904,8 +937,11 @@ private:
       .stencil = 0U,
     };
     vk::RenderingAttachmentInfo color_attachment_info {
-      .imageView = swapchain_image_views_[ image_index ],
+      .imageView = color_image_view_,
       .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+      .resolveMode = vk::ResolveModeFlagBits::eAverage,
+      .resolveImageView = swapchain_image_views_[ image_index ],
+      .resolveImageLayout = vk::ImageLayout::eColorAttachmentOptimal,
       .loadOp = vk::AttachmentLoadOp::eClear,
       .storeOp = vk::AttachmentStoreOp::eStore,
       .clearValue = clear_color,
@@ -1120,11 +1156,12 @@ private:
         [ this ]() -> std::expected<void, vkutils::error>
         {
           cleanup_swapchain();
-
           return create_swapchain();
         })
       .and_then([ this ]() -> std::expected<void, vkutils::error>
         { return create_image_views(); })
+      .and_then([ this ]() -> std::expected<void, vkutils::error>
+        { return create_color_resources(); })
       .and_then([ this ]() -> std::expected<void, vkutils::error>
         { return create_depth_resources(); });
   }
@@ -1708,10 +1745,10 @@ private:
 
   constexpr auto
   create_image(std::uint32_t width, std::uint32_t height,
-    std::uint32_t mip_levels, vk::Format format, vk::ImageTiling tiling,
-    vk::ImageUsageFlags usage, vk::MemoryPropertyFlags properties,
-    vk::raii::Image& image, vk::raii::DeviceMemory& image_memory)
-    -> std::expected<void, vkutils::error>
+    std::uint32_t mip_levels, vk::SampleCountFlagBits sample_count,
+    vk::Format format, vk::ImageTiling tiling, vk::ImageUsageFlags usage,
+    vk::MemoryPropertyFlags properties, vk::raii::Image& image,
+    vk::raii::DeviceMemory& image_memory) -> std::expected<void, vkutils::error>
   {
     vk::ImageCreateInfo image_info {
       .imageType = vk::ImageType::e2D,
@@ -1723,7 +1760,7 @@ private:
       },
       .mipLevels = mip_levels,
       .arrayLayers = 1,
-      .samples = vk::SampleCountFlagBits::e1,
+      .samples = sample_count,
       .tiling = tiling,
       .usage = usage,
       .sharingMode = vk::SharingMode::eExclusive,
@@ -2008,6 +2045,43 @@ private:
       });
   }
 
+  constexpr auto
+  get_max_usable_sample_count() -> vk::SampleCountFlagBits
+  {
+    const auto physical_device_properties = physical_device_.getProperties();
+
+    auto counts =
+      physical_device_properties.limits.framebufferColorSampleCounts &
+      physical_device_properties.limits.framebufferDepthSampleCounts;
+
+    if (counts & vk::SampleCountFlagBits::e64)
+    {
+      return vk::SampleCountFlagBits::e64;
+    }
+    if (counts & vk::SampleCountFlagBits::e32)
+    {
+      return vk::SampleCountFlagBits::e32;
+    }
+    if (counts & vk::SampleCountFlagBits::e16)
+    {
+      return vk::SampleCountFlagBits::e16;
+    }
+    if (counts & vk::SampleCountFlagBits::e8)
+    {
+      return vk::SampleCountFlagBits::e8;
+    }
+    if (counts & vk::SampleCountFlagBits::e4)
+    {
+      return vk::SampleCountFlagBits::e4;
+    }
+    if (counts & vk::SampleCountFlagBits::e2)
+    {
+      return vk::SampleCountFlagBits::e2;
+    }
+
+    return vk::SampleCountFlagBits::e1;
+  }
+
 private:
   // 8 bytes alignment
   GLFWwindow* window_ {};
@@ -2054,6 +2128,10 @@ private:
   vk::raii::DeviceMemory depth_image_memory_ { nullptr };
   vk::raii::ImageView depth_image_view_ { nullptr };
 
+  vk::raii::Image color_image_ { nullptr };
+  vk::raii::DeviceMemory color_image_memory_ { nullptr };
+  vk::raii::ImageView color_image_view_ { nullptr };
+
   // 4 bytes alignment
   vk::SurfaceFormatKHR swapchain_surface_format_ {};
   vk::Extent2D swapchain_extent_ {};
@@ -2064,6 +2142,8 @@ private:
   vk::Format depth_format_ {};
 
   std::uint32_t mip_levels_ {};
+
+  vk::SampleCountFlagBits msaa_samples_ = vk::SampleCountFlagBits::e1;
 
   // 1 byte alignment
   bool framebuffer_resized_ {};
