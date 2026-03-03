@@ -20,8 +20,9 @@ enum class error : std::uint8_t
   queue_present_failed,
   unsupported_layout_transition,
   search_for_supported_format_failed,
-  stb_load_failed,
-  tinyobj_load_failed
+  texture_load_failed,
+  model_load_failed,
+  unsupported_index_component_type
 };
 
 constexpr auto
@@ -55,10 +56,12 @@ to_string(error e) -> std::string_view
     return "failed to transition image layout due to unsupported layout";
   case error::search_for_supported_format_failed:
     return "Failed to find supported format";
-  case error::stb_load_failed:
-    return "failed to load image from a file";
-  case error::tinyobj_load_failed:
-    return "failed to load model from an obj file";
+  case error::texture_load_failed:
+    return "failed to load a texture image from a file";
+  case error::model_load_failed:
+    return "failed to load a model from a file";
+  case error::unsupported_index_component_type:
+    return "unsupported index component type of the model";
   }
   return "unknown error";
 }

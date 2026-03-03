@@ -32,9 +32,10 @@ if(tinygltf_FOUND)
       INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${tinygltf_INCLUDE_DIRS}"
       INTERFACE_INCLUDE_DIRECTORIES "${tinygltf_INCLUDE_DIRS}"
     )
-    # tinygltf requires these defines when used as header-only
+    # tinygltf requires these defines when used as header-only.
+    # NOTE: TINYGLTF_IMPLEMENTATION is intentionally omitted here;
+    # it must be defined in exactly ONE translation unit (implementations.cpp).
     target_compile_definitions(tinygltf::tinygltf INTERFACE
-      TINYGLTF_IMPLEMENTATION
       TINYGLTF_NO_EXTERNAL_IMAGE
       TINYGLTF_NO_STB_IMAGE
       TINYGLTF_NO_STB_IMAGE_WRITE

@@ -67,6 +67,14 @@ add_executable(main main.cpp src/implementations.cpp)
 # Suppress all warnings for third-party STB implementation
 set_source_files_properties(src/stb_image_impl.cpp PROPERTIES COMPILE_OPTIONS "-w")
 
+# implementations.cpp must define TINYGLTF_IMPLEMENTATION *before* the first
+# include of tiny_gltf.h, so skip the precompiled header (which also includes
+# that header) for this file.  Suppress warnings (-w) for third-party code.
+set_source_files_properties(src/implementations.cpp PROPERTIES
+  SKIP_PRECOMPILE_HEADERS ON
+  COMPILE_OPTIONS "-w"
+)
+
 target_compile_definitions(
   main PUBLIC
   VULKAN_HPP_DISPATCH_LOADER_DYNAMIC=1

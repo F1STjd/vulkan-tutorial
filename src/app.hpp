@@ -8,9 +8,9 @@
 
 static constexpr std::uint32_t initial_width { 800 };
 static constexpr std::uint32_t initial_height { 600 };
-static const std::string model_path { MODELS_DIR "/viking_room.obj" };
+static const std::string model_path { MODELS_DIR "/viking_room.glb" };
 static const std::string texture_path {
-  TEXTURES_DIR "/viking_room.png",
+  TEXTURES_DIR "/viking_room.ktx2",
 };
 
 static constexpr std::int32_t max_frames_in_flight { 2 };
@@ -469,7 +469,7 @@ private:
       .rasterizerDiscardEnable = vk::False,
       .polygonMode = vk::PolygonMode::eFill,
       .cullMode = vk::CullModeFlagBits::eBack,
-      .frontFace = vk::FrontFace::eCounterClockwise,
+      .frontFace = vk::FrontFace::eClockwise,
       .depthBiasEnable = vk::False,
       .depthBiasSlopeFactor = 1.0F,
       .lineWidth = 1.0F,
@@ -613,49 +613,85 @@ private:
   constexpr auto
   create_texture_image() -> std::expected<void, vkutils::error>
   {
-    std::int32_t texture_width {};
-    std::int32_t texture_height {};
-    std::int32_t texture_channels {};
+    ktxTexture2* ktx_texture;
+    KTX_error_code result =
+      ktxTexture2_CreateFromNamedFile(texture_path.c_str(),
+        KTX_TEXTURE_CREATE_LOAD_IMAGE_DATA_BIT, &ktx_texture);
 
-    auto* pixels = stbi_load(texture_path.c_str(), &texture_width,
-      &texture_height, &texture_channels, STBI_rgb_alpha);
-    const vk::DeviceSize image_size { static_cast<std::size_t>(texture_width) *
-      static_cast<std::size_t>(texture_height) * 4UZ };
-    mip_levels_ = static_cast<std::uint32_t>(std::floor(
-                    std::log2(std::max(texture_width, texture_height)))) +
-      1;
-
-    const auto u_texture_width = static_cast<std::uint32_t>(texture_width);
-    const auto u_texture_height = static_cast<std::uint32_t>(texture_height);
-
-    if (pixels == nullptr)
+    if (result != KTX_SUCCESS)
     {
       return std::unexpected {
-        vkutils::error { .reason = apputils::error::stb_load_failed },
+        vkutils::error { .reason = apputils::error::texture_load_failed },
       };
+    }
+
+    if (ktxTexture2_NeedsTranscoding(ktx_texture))
+    {
+      result = ktxTexture2_TranscodeBasis(
+        ktx_texture, KTX_TTF_BC7_RGBA, KTX_TF_HIGH_QUALITY);
+      if (result != KTX_SUCCESS)
+      {
+        ktxTexture2_Destroy(ktx_texture);
+        return std::unexpected {
+          vkutils::error { .reason = apputils::error::texture_load_failed },
+        };
+      }
+    }
+
+    const std::uint32_t texture_width = ktx_texture->baseWidth;
+    const std::uint32_t texture_height = ktx_texture->baseHeight;
+    const std::size_t total_size =
+      ktxTexture_GetDataSize(ktxTexture(ktx_texture));
+    const std::uint8_t* ktx_texture_data =
+      ktxTexture_GetData(ktxTexture(ktx_texture));
+    mip_levels_ = ktx_texture->numLevels;
+    texture_format_ = static_cast<vk::Format>(ktx_texture->vkFormat);
+
+    std::vector<vk::BufferImageCopy> copy_regions;
+    copy_regions.reserve(mip_levels_);
+    for (auto level : std::views::iota(0U, mip_levels_))
+    {
+      ktx_size_t offset {};
+      ktxTexture2_GetImageOffset(ktx_texture, level, 0, 0, &offset);
+
+      copy_regions.push_back(vk::BufferImageCopy {
+        .bufferOffset = offset,
+        .bufferRowLength = 0,
+        .bufferImageHeight = 0,
+        .imageSubresource {
+          .aspectMask = vk::ImageAspectFlagBits::eColor,
+          .mipLevel = level,
+          .baseArrayLayer = 0,
+          .layerCount = 1,
+        },
+        .imageOffset { .x = 0, .y = 0, .z = 0 },
+        .imageExtent {
+          .width = std::max(texture_width >> level, 1U),
+          .height = std::max(texture_height >> level, 1U),
+          .depth = 1,
+        },
+      });
     }
 
     vk::raii::Buffer staging_buffer { nullptr };
     vk::raii::DeviceMemory staging_buffer_memory { nullptr };
-    return create_buffer(image_size, vk::BufferUsageFlagBits::eTransferSrc,
+    return create_buffer(total_size, vk::BufferUsageFlagBits::eTransferSrc,
       vk::MemoryPropertyFlagBits::eHostVisible |
         vk::MemoryPropertyFlagBits::eHostCoherent,
       staging_buffer, staging_buffer_memory)
       .and_then(
         [ & ]() noexcept -> std::expected<void, vkutils::error>
         {
-          return map_memory(image_size, staging_buffer_memory,
-            std::span { pixels, image_size });
+          return map_memory(total_size, staging_buffer_memory,
+            std::span { ktx_texture_data, total_size });
         })
-      .transform([ & ]() -> void { stbi_image_free(pixels); })
       .and_then(
         [ &, this ]() -> std::expected<void, vkutils::error>
         {
-          return create_image(u_texture_width, u_texture_height, mip_levels_,
-            vk::SampleCountFlagBits::e1, vk::Format::eR8G8B8A8Srgb,
+          return create_image(texture_width, texture_height, mip_levels_,
+            vk::SampleCountFlagBits::e1, texture_format_,
             vk::ImageTiling::eOptimal,
-            vk::ImageUsageFlagBits::eTransferSrc |
-              vk::ImageUsageFlagBits::eTransferDst |
+            vk::ImageUsageFlagBits::eTransferDst |
               vk::ImageUsageFlagBits::eSampled,
             vk::MemoryPropertyFlagBits::eDeviceLocal, texture_image_,
             texture_image_memory_);
@@ -671,20 +707,23 @@ private:
         [ &, this ]() noexcept -> std::expected<void, vkutils::error>
         {
           return copy_buffer_to_image(
-            staging_buffer, texture_image_, u_texture_width, u_texture_height);
+            staging_buffer, texture_image_, copy_regions);
         })
       .and_then(
-        [ &, this ]() noexcept -> std::expected<void, vkutils::error>
+        [ this ]() noexcept -> std::expected<void, vkutils::error>
         {
-          return generate_mip_maps(texture_image_, vk::Format::eR8G8B8A8Srgb,
-            texture_width, texture_height, mip_levels_);
-        });
+          return transition_image_layout(texture_image_,
+            vk::ImageLayout::eTransferDstOptimal,
+            vk::ImageLayout::eShaderReadOnlyOptimal, mip_levels_);
+        })
+      .transform(
+        [ & ]() noexcept -> void { ktxTexture2_Destroy(ktx_texture); });
   }
 
   constexpr auto
   create_texture_image_view() -> std::expected<void, vkutils::error>
   {
-    return create_image_view(texture_image_, vk::Format::eR8G8B8A8Srgb,
+    return create_image_view(texture_image_, texture_format_,
       vk::ImageAspectFlagBits::eColor, mip_levels_)
       .transform(vkutils::store_into(texture_image_view_));
   }
@@ -692,8 +731,7 @@ private:
   constexpr auto
   load_model() -> std::expected<void, vkutils::error>
   {
-    return vkutils::locate(
-      load::model_obj(vertices_, indices_, model_path.c_str()));
+    return vkutils::locate(load::model_gltf(vertices_, indices_, model_path));
   }
 
   // https://docs.vulkan.org/tutorial/latest/04_Vertex_buffers/03_Index_buffer.html
@@ -1872,6 +1910,22 @@ private:
   }
 
   constexpr auto
+  copy_buffer_to_image(const vk::raii::Buffer& buffer, vk::raii::Image& image,
+    std::span<const vk::BufferImageCopy> regions)
+    -> std::expected<void, vkutils::error>
+  {
+    return begin_single_time_commands().and_then(
+      [ & ](vk::raii::CommandBuffer command_copy_buffer) noexcept
+        -> std::expected<void, vkutils::error>
+      {
+        command_copy_buffer.copyBufferToImage(
+          buffer, image, vk::ImageLayout::eTransferDstOptimal, regions);
+
+        return end_single_time_commands(std::move(command_copy_buffer));
+      });
+  }
+
+  constexpr auto
   create_image_view(vk::Image image, vk::Format format,
     vk::ImageAspectFlags aspect_flags, std::uint32_t mip_levels)
     -> std::expected<vk::raii::ImageView, vkutils::error>
@@ -1936,115 +1990,6 @@ private:
   {
     return format == vk::Format::eD32SfloatS8Uint ||
       format == vk::Format::eD24UnormS8Uint;
-  }
-
-  // TODO(Konrad): its a mess - so fix the mess
-  constexpr auto
-  generate_mip_maps(vk::raii::Image& image, vk::Format image_format,
-    std::int32_t texture_width, std::int32_t texture_height,
-    std::uint32_t mip_levels) -> std::expected<void, vkutils::error>
-  {
-    const auto format_properties =
-      physical_device_.getFormatProperties(image_format);
-    if (!(format_properties.optimalTilingFeatures &
-          vk::FormatFeatureFlagBits::eSampledImageFilterLinear))
-    {
-      return std::unexpected {
-        vkutils::error {
-          .reason = apputils::error::search_for_supported_format_failed,
-        },
-      };
-    }
-
-    return begin_single_time_commands().and_then(
-      [ & ](vk::raii::CommandBuffer&& command_buffer) noexcept
-        -> std::expected<void, vkutils::error>
-      {
-        vk::ImageMemoryBarrier barrier {
-          .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
-          .dstAccessMask = vk::AccessFlagBits::eTransferRead,
-          .oldLayout = vk::ImageLayout::eTransferDstOptimal,
-          .newLayout = vk::ImageLayout::eTransferSrcOptimal,
-          .srcQueueFamilyIndex = vk::QueueFamilyIgnored,
-          .dstQueueFamilyIndex = vk::QueueFamilyIgnored,
-          .image = image,
-          .subresourceRange {
-            .aspectMask = vk::ImageAspectFlagBits::eColor,
-            .levelCount = 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-          },
-        };
-
-        std::int32_t mip_width = texture_width;
-        std::int32_t mip_height = texture_height;
-        for (auto mip_level : std::views::iota(1U, mip_levels))
-        {
-          barrier.subresourceRange.baseMipLevel = mip_level - 1U;
-          barrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
-          barrier.newLayout = vk::ImageLayout::eTransferSrcOptimal;
-          barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-          barrier.dstAccessMask = vk::AccessFlagBits::eTransferRead;
-
-          command_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
-            vk::PipelineStageFlagBits::eTransfer, {}, {}, {}, barrier);
-
-          const std::array source_offsets {
-            vk::Offset3D { .x = 0, .y = 0, .z = 0 },
-            vk::Offset3D { .x = mip_width, .y = mip_height, .z = 1 },
-          };
-          const std::array destination_offsets {
-            vk::Offset3D { .x = 0, .y = 0, .z = 0 },
-            vk::Offset3D {
-              .x = mip_width > 1 ? mip_width / 2 : 1,
-              .y = mip_height > 1 ? mip_height / 2 : 1,
-              .z = 1,
-            },
-          };
-
-          vk::ImageBlit blit {
-            .srcSubresource = {},
-            .srcOffsets = source_offsets,
-            .dstSubresource = {},
-            .dstOffsets = destination_offsets,
-          };
-          blit.srcSubresource = vk::ImageSubresourceLayers {
-            .aspectMask = vk::ImageAspectFlagBits::eColor,
-            .mipLevel = mip_level - 1,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-          };
-          blit.dstSubresource = vk::ImageSubresourceLayers {
-            .aspectMask = vk::ImageAspectFlagBits::eColor,
-            .mipLevel = mip_level,
-            .baseArrayLayer = 0,
-            .layerCount = 1,
-          };
-          command_buffer.blitImage(image, vk::ImageLayout::eTransferSrcOptimal,
-            image, vk::ImageLayout::eTransferDstOptimal, { blit },
-            vk::Filter::eLinear);
-
-          barrier.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
-          barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-          barrier.srcAccessMask = vk::AccessFlagBits::eTransferRead;
-          barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
-          command_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
-            vk::PipelineStageFlagBits::eFragmentShader, {}, {}, {}, barrier);
-
-          if (mip_width > 1) { mip_width /= 2; }
-          if (mip_height > 1) { mip_height /= 2; }
-        }
-
-        barrier.subresourceRange.baseMipLevel = mip_levels - 1;
-        barrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
-        barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-        barrier.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
-        barrier.dstAccessMask = vk::AccessFlagBits::eShaderRead;
-        command_buffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
-          vk::PipelineStageFlagBits::eFragmentShader, {}, {}, {}, barrier);
-
-        return end_single_time_commands(std::move(command_buffer));
-      });
   }
 
   constexpr auto
@@ -2142,6 +2087,7 @@ private:
   std::uint32_t frame_index_ {};
 
   vk::Format depth_format_ {};
+  vk::Format texture_format_ {};
 
   std::uint32_t mip_levels_ {};
 

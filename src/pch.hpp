@@ -20,9 +20,13 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/hash.hpp>
 
-#include <stb_image.h>
+// #include <stb_image.h>
 
-#include <tiny_obj_loader.h>
+#include <ktx.h>
+
+#include <tiny_gltf.h>
+
+// #include <tiny_obj_loader.h>
 #pragma GCC diagnostic pop
 
 #include <algorithm>
